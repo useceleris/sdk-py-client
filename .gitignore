@@ -1,0 +1,24 @@
+# Environments and tool caches
+.venv/
+.nox/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build output
+build/
+dist/
+*.egg-info/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Credentials: .env holds the signing secret. .env.example lists the keys.
+.env
+.env.*
+!.env.example
+
+.DS_Store
