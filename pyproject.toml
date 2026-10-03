@@ -36,7 +36,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://useceleris.com"
+Homepage = "https://useceleris.com/docs/sdks/python"
 Repository = "https://github.com/useceleris/sdk-py-client"
 
 [dependency-groups]
