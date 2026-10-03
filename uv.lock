@@ -750,7 +750,7 @@ wheels = [
 
 [[package]]
 name = "useceleris-client"
-version = "0.0.0b2"
+version = "0.0.0b3"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
