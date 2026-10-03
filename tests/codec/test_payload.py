@@ -104,6 +104,15 @@ class TestJsonPayloads:
         assert caught.value.__context__ is None
         assert "synthetic-marker" not in repr(caught.value)
 
+    def test_rejects_json_nested_too_deep_to_read(self) -> None:
+        # Deep enough to exhaust the parser's recursion protection on every
+        # supported version.
+        with pytest.raises(ConfigurationError) as caught:
+            read_json(b"[" * 1_000_000 + b"]" * 1_000_000)
+
+        assert str(caught.value) == "Payload is valid UTF-8 but not valid JSON."
+        assert caught.value.__context__ is None
+
     @pytest.mark.parametrize("text", ["{ not json", "NaN", "[Infinity]", "-Infinity"])
     def test_rejects_payloads_that_are_not_valid_json(self, text: str) -> None:
         with pytest.raises(ConfigurationError) as caught:

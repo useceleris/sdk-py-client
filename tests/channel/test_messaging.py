@@ -1080,3 +1080,25 @@ async def test_holds_exactly_1024_ids_in_the_dedup_window(
     sockets[-1].receive(message_frame("chat", "id-0", "x"))
 
     assert len(delivered) == 1024
+
+
+async def test_reports_a_listener_that_returns_a_coroutine(
+    setup: ChannelSetup, sockets: list[FakeWebSocket]
+) -> None:
+    # Not an async def, so registration accepts it; the coroutine it returns
+    # would never run.
+    errors: list[ChannelError] = []
+    handled: list[bytes] = []
+    setup.channel.events().on_error(errors.append)
+
+    async def handle(payload: bytes) -> None:
+        handled.append(payload)
+
+    # Typing refuses it; an untyped caller can still pass it.
+    untyped: Any = lambda payload, metadata: handle(payload)  # noqa: E731
+    setup.channel.segment("chat").on_message(untyped)
+
+    sockets[-1].receive(message_frame("chat", "id-1", "x"))
+
+    assert handled == []
+    assert [str(error) for error in errors] == [LISTENER_FAILURE]

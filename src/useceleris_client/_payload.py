@@ -69,8 +69,9 @@ def _reject_constant(constant: str) -> Any:
 def read_json(payload: bytes) -> Any:
     text = read_text(payload)
 
-    # JSON has no NaN or infinities, though json.loads accepts them.
-    with contextlib.suppress(ValueError):
+    # JSON has no NaN or infinities, though json.loads accepts them. Nesting
+    # too deep to parse is as unreadable as malformed text.
+    with contextlib.suppress(ValueError, RecursionError):
         return json.loads(text, parse_constant=_reject_constant)
 
     # json's own message quotes the text, so it is not passed on.

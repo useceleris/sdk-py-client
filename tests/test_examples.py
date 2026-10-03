@@ -3,23 +3,23 @@ import subprocess
 import sys
 from pathlib import Path
 
-import useceleris_client
-
 ROOT = Path(__file__).resolve().parents[1]
 
-# The names the snippets assume are already in scope, as a reader would.
-PREAMBLE = f"""
-from useceleris_client import {", ".join(useceleris_client.__all__)}
+# The objects the snippets assume already exist, as a reader would. The SDK is
+# bound only under a private alias, so a snippet must import every name it
+# uses.
+PREAMBLE = """
+import useceleris_client as _celeris
 
-client: Client
-channel: Channel
-chat: Segment
+client: _celeris.Client
+channel: _celeris.Channel
+chat: _celeris.Segment
 data: bytes
-page: PresencePage
-metadata: MessageMetadata
+page: _celeris.PresencePage
+metadata: _celeris.MessageMetadata
 
 
-async def fetch_credentials(request: CredentialRequest) -> dict[str, str]:
+async def fetch_credentials(request: _celeris.CredentialRequest) -> dict[str, str]:
     raise NotImplementedError
 """
 

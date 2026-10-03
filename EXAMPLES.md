@@ -91,7 +91,7 @@ def receive(payload: bytes, metadata: MessageMetadata) -> None:
     task.add_done_callback(background.discard)
 
 
-chat.on_message(receive)
+channel.default_segment().on_message(receive)
 ```
 
 Tasks started this way are your queue, and bounding it is your choice; the SDK keeps none.
@@ -126,9 +126,10 @@ await chat.publish(json_payload({"hello": "world"}))
 lobby.on_message(lambda payload, metadata: print("lobby:", metadata.message_id))
 await lobby.publish(text_payload("hello lobby"))
 
-# Tear down. When the LAST interest in a named segment is cancelled, UNSUB is
-# sent. The default segment is never left: the client sends no SUB or UNSUB
-# for it.
+# Tear down. Releasing the last message interest in a named segment sends
+# UNSUB, unless a presence interest still holds it; cancelling presence never
+# sends UNSUB. The default segment is never left: the client sends no SUB or
+# UNSUB for it.
 stop_chat()
 membership.cancel()  # idempotent
 ```
@@ -214,7 +215,12 @@ Two channels are fully independent: separate sockets, memberships, presence entr
 Every error the SDK raises or reports is a `CelerisError` with a stable `code`; match on `code`, never on message text. Messages name the field and the rule that failed but never repeat your input, a credential or server text.
 
 ```python
-from useceleris_client import CelerisConnectionError, ConfigurationError, ServerError
+from useceleris_client import (
+    CelerisConnectionError,
+    ChannelError,
+    ConfigurationError,
+    ServerError,
+)
 
 try:
     await channel.connect()

@@ -428,3 +428,38 @@ async def test_keeps_credentials_out_of_the_logs(
         for message in client_records
     )
     assert not any("payload=" in message for message in client_records)
+
+
+async def test_closes_within_the_budget_when_the_peer_stops_reading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("useceleris_client._websocket.CLOSE_BUDGET_MS", 200)
+
+    # The server never reads: once its small queue is full it stops taking
+    # bytes, and the client's writer can no longer drain.
+    async def never_read(connection: ServerConnection) -> None:
+        await connection.wait_closed()
+
+    # A short close timeout: the server, no longer reading, only notices the
+    # aborted connection when it shuts down.
+    async with serve(
+        never_read, "127.0.0.1", 0, max_queue=1, close_timeout=0.1
+    ) as running:
+        socket = WebSocket(f"ws://127.0.0.1:{port_of(running)}")
+        opened = asyncio.Event()
+        closed = asyncio.Event()
+        socket.on_open = opened.set
+        socket.on_close = closed.set
+        await asyncio.wait_for(opened.wait(), 5)
+
+        for _ in range(64):
+            socket.send(bytes(1024 * 1024))
+
+        await asyncio.sleep(0.2)
+        assert socket.buffered_amount > 0
+
+        socket.close()
+        await asyncio.wait_for(closed.wait(), 5)
+
+    assert socket.ready_state == WebSocket.CLOSED
+    assert socket.buffered_amount == 0

@@ -6,6 +6,8 @@ from collections.abc import Callable
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, ConnectionClosedError
 
+from useceleris_client._constants import CLOSE_BUDGET_MS
+
 # Records nothing. It is not registered with logging, so configuring logging
 # cannot turn it on: the library's handshake log line carries the credential
 # URL.
@@ -37,6 +39,8 @@ class WebSocket:
         self.on_close: Callable[[], None] | None = None
         self._outbound: deque[bytes] = deque()
         self._outbound_ready = asyncio.Event()
+        self._connection: ClientConnection | None = None
+        self._close_deadline: asyncio.TimerHandle | None = None
         self._task = asyncio.get_running_loop().create_task(self._run(url))
 
     def send(self, data: bytes) -> None:
@@ -56,10 +60,15 @@ class WebSocket:
 
         if connecting:
             self._task.cancel()
-        else:
-            # Frames queued before close still go out, ahead of the close
-            # frame.
-            self._outbound_ready.set()
+            return
+
+        # Frames queued before close still go out, ahead of the close frame,
+        # but a peer that stops reading cannot hold the socket open past the
+        # close budget.
+        self._outbound_ready.set()
+        self._close_deadline = asyncio.get_running_loop().call_later(
+            CLOSE_BUDGET_MS / 1000, self._abort
+        )
 
     async def _run(self, url: str) -> None:
         try:
@@ -82,6 +91,7 @@ class WebSocket:
             self._finish(failed=True)
             return
 
+        self._connection = connection
         self.ready_state = WebSocket.OPEN
         self._dispatch(self.on_open)
         writer = asyncio.get_running_loop().create_task(self._write(connection))
@@ -101,6 +111,9 @@ class WebSocket:
             pass
         finally:
             writer.cancel()
+            # Closed even when the peer closed first: Python 3.10 otherwise
+            # warns that a TLS transport was never closed.
+            connection.transport.close()
             self._finish(failed)
 
     async def _write(self, connection: ClientConnection) -> None:
@@ -121,8 +134,17 @@ class WebSocket:
             # The reader sees the same closure and reports it.
             return
 
+    def _abort(self) -> None:
+        if self._connection is not None:
+            self._connection.transport.abort()
+
     def _finish(self, failed: bool) -> None:
         self.ready_state = WebSocket.CLOSED
+        self._outbound.clear()
+        self.buffered_amount = 0
+
+        if self._close_deadline is not None:
+            self._close_deadline.cancel()
 
         if failed:
             self._dispatch(self.on_error)

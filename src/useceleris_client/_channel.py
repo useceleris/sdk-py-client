@@ -131,7 +131,7 @@ Listener = ParamSpec("Listener")
 
 class _ListenerEntry(Generic[Listener]):
     # One per registration, so a callback registered twice is two entries.
-    def __init__(self, callback: Callable[Listener, None]) -> None:
+    def __init__(self, callback: Callable[Listener, object]) -> None:
         self.callback = callback
 
 
@@ -143,7 +143,7 @@ class _ListenerSet(Generic[Listener]):
         self._contain_failure = contain_failure
         self._entries: list[_ListenerEntry[Listener]] = []
 
-    def add(self, callback: Callable[Listener, None]) -> Callable[[], None]:
+    def add(self, callback: Callable[Listener, object]) -> Callable[[], None]:
         # A coroutine function's call would only create a coroutine that never
         # runs, so it is refused here rather than silently dropped.
         if not callable(callback) or inspect.iscoroutinefunction(callback):
@@ -172,8 +172,15 @@ class _ListenerSet(Generic[Listener]):
             # CancelledError too: raised inside a synchronous callback it is
             # the callback's own failure, never a cancellation of the reader.
             try:
-                entry.callback(*values, **named)
+                outcome = entry.callback(*values, **named)
             except (Exception, asyncio.CancelledError):
+                self._contain_failure()
+                continue
+
+            # A coroutine handed back would never run: it fails like a raising
+            # listener, and is closed so it is not reported as never awaited.
+            if inspect.iscoroutine(outcome):
+                outcome.close()
                 self._contain_failure()
 
 

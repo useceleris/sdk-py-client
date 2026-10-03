@@ -10,7 +10,7 @@ Realtime client for Celeris channels, for Python's asyncio: connection lifecycle
 pip install --pre useceleris-client
 ```
 
-Python 3.10 to 3.14. Releases are currently pre-releases, hence `--pre`.
+Python 3.10 to 3.14.
 
 ## Quickstart
 
@@ -102,6 +102,8 @@ python3 -m venv .venv
 .venv/bin/pip install -e . --group dev
 .venv/bin/nox
 ```
+
+`make release` runs that check, builds, and uploads to PyPI from a clean git tree; `make release-test` rehearses on TestPyPI, and `make smoke` installs the published version in a fresh environment.
 
 Read [CONVENTIONS.md](CONVENTIONS.md) before contributing, and [SECURITY.md](SECURITY.md) before reporting a vulnerability.
 
