@@ -4,9 +4,13 @@
 #   make release-test   rehearse on TestPyPI
 #   make release        publish to PyPI; needs a clean git tree
 #   make smoke          install the published version in a fresh venv
+#   make dist           build and check without uploading (optional)
 #
-# Both uploads run the full check first. Twine asks for the API token unless
-# TWINE_PASSWORD is set; a TestPyPI token is separate from a PyPI one.
+# Both uploads run `make dist` first, which runs the full check (nox), then
+# builds and checks the files; nothing is uploaded if any step fails.
+#
+# Twine asks for the API token unless TWINE_PASSWORD is set; a TestPyPI token
+# is separate from a PyPI one.
 
 NAME := $(shell sed -n 's/^name = "\(.*\)"/\1/p' pyproject.toml)
 VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)
