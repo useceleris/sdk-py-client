@@ -11,7 +11,7 @@ from pathlib import Path
 import nox
 from packaging.requirements import Requirement
 
-nox.options.default_venv_backend = "venv"
+nox.options.default_venv_backend = "uv"
 nox.options.reuse_venv = "yes"
 nox.options.sessions = ["lint", "typecheck", "tests", "package"]
 
@@ -66,11 +66,11 @@ def live(session: nox.Session) -> None:
 def package(session: nox.Session) -> None:
     """Builds the sdist and wheel, checks what they contain, installs the wheel
     alone and uses it as a consumer would."""
-    session.install(requirement("build"), requirement("mypy"))
+    session.install(requirement("mypy"))
     work = Path(session.create_tmp())
     distribution = work / "dist"
     shutil.rmtree(distribution, ignore_errors=True)
-    session.run("python", "-m", "build", "--outdir", str(distribution), str(ROOT))
+    session.run("uv", "build", "--out-dir", str(distribution), str(ROOT), external=True)
 
     (wheel,) = distribution.glob("*.whl")
     (sdist,) = distribution.glob("*.tar.gz")

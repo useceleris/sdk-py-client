@@ -95,13 +95,14 @@ The client turns off the WebSocket library's own logging for its connections, be
 
 ## Development
 
-`nox` runs the whole check: lint, `mypy --strict`, the unit suites on every supported Python, and the package check (build, install the wheel alone, verify its contents and that it carries no signing facility). `nox -s live` runs the acceptance suites against a real Celeris stack; they read `CELERIS_WS_URL`, `CELERIS_CLIENT_ID` and `CELERIS_SIGNING_SECRET` from a gitignored `.env` or the environment.
+`uv run nox` runs the whole check: lint, `mypy --strict`, the unit suites on every supported Python, and the package check (build, install the wheel alone, verify its contents and that it carries no signing facility). `uv run nox -s live` runs the acceptance suites against a real Celeris stack; they read `CELERIS_WS_URL`, `CELERIS_CLIENT_ID` and `CELERIS_SIGNING_SECRET` from a gitignored `.env` or the environment.
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install -e . --group dev
-.venv/bin/nox
+uv sync
+uv run nox
 ```
+
+`uv sync` creates `.venv` with the package and its development tools, at the versions in `uv.lock`. `uv add` and `uv remove` change a dependency in `pyproject.toml` and `uv.lock` together: give a runtime dependency a range (`uv add "httpx>=0.28,<1"`) and pin a tool exactly (`uv add --group dev "coverage==7.10.0"`).
 
 `make release` runs that check, builds, and uploads to PyPI from a clean git tree; `make release-test` rehearses on TestPyPI, and `make smoke` installs the published version in a fresh environment.
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "useceleris-client"
-version = "0.0.0b2"
+version = "0.0.0b3"
 description = "Celeris realtime client"
 readme = "README.md"
 license = "Apache-2.0"
@@ -41,7 +41,6 @@ Repository = "https://github.com/useceleris/sdk-py-client"
 
 [dependency-groups]
 dev = [
-  "build==1.6.1",
   "mypy==2.4.0",
   "nox==2026.8.17",
   "pytest==9.1.1",
@@ -49,7 +48,6 @@ dev = [
   "pytest-timeout==2.4.0",
   "ruff==0.16.10",
 ]
-release = ["twine==7.0.0"]
 
 [tool.hatch.build.targets.sdist]
 only-include = ["src", "README.md", "LICENSE"]

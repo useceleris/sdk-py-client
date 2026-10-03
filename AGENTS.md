@@ -13,4 +13,4 @@ The protocol contract, the decisions this package's API traces to, and the evide
 - Runtime dependencies are version ranges (pydantic, websockets, typing-extensions); add one only when the user authorizes it. Development tools are pinned exactly in the `dev` dependency group.
 - Express protocol bytes directly (`b"*"`, `b"\n"`), keep the decoder's cursor and bounds in `MessageDecoder`, dispatch markers with `match`, and save diagnostic positions as `field_start_offset`. Protocol errors carry fixed reasons, code-authored field names and zero-based offsets; never received values.
 - Reject ill-formed text (unpaired surrogates) before encoding; preserve valid Unicode without normalization.
-- Run `nox` before completion and record the actual results. `nox -s live` needs the `.env` realtime and never runs by default. Do not publish.
+- Run `uv run nox` before completion and record the actual results. `uv run nox -s live` needs the `.env` realtime and never runs by default. Do not publish.
