@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import contextlib
 import hashlib
 import hmac
 import itertools
@@ -7,7 +8,7 @@ import json
 import os
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -51,9 +52,19 @@ def sign_credentials(client_id: str, signing_secret: str, **claims: Any) -> Cred
 
     assert not claims, f"Unknown claims: {sorted(claims)}"
 
-    payload = base64.b64encode(
-        json.dumps(wire, separators=(",", ":"), ensure_ascii=False).encode()
-    ).decode()
+    return sign_raw_payload(
+        client_id,
+        signing_secret,
+        json.dumps(wire, separators=(",", ":"), ensure_ascii=False),
+    )
+
+
+def sign_raw_payload(
+    client_id: str, signing_secret: str, payload_text: str
+) -> Credentials:
+    """Signs any payload text as it is, for claims the keyword form cannot
+    express (malformed JSON, missing or wrongly typed fields)."""
+    payload = base64.b64encode(payload_text.encode()).decode()
     digest = hmac.new(
         signing_secret.encode(), payload.encode(), hashlib.sha512
     ).hexdigest()
@@ -70,6 +81,13 @@ def websocket_url() -> str:
     return os.environ["CELERIS_WS_URL"]
 
 
+# Optional: a gateway that routes to a different server node, used for the
+# second connection of the cross-node tests. Without it, those tests skip,
+# because two connections through one gateway can share a node.
+def peer_websocket_url() -> str:
+    return os.environ["CELERIS_WS_URL_PEER"]
+
+
 def client_id() -> str:
     return os.environ["CELERIS_CLIENT_ID"]
 
@@ -82,29 +100,52 @@ def unique_channel_reference(label: str) -> str:
     return f"pyqual-{label}-{now_ms()}-{next(_channel_counter)}"
 
 
-def client_with(credentials: Callable[[], Credentials]) -> Client:
+def client_with(
+    credentials: Callable[[], Credentials], base_url: str | None = None
+) -> Client:
     async def provide(request: CredentialRequest) -> Credentials:
         return credentials()
 
     return create_client(
-        base_url=websocket_url(),
+        base_url=base_url or websocket_url(),
         allow_insecure_loopback=True,
         credential_provider=provide,
     )
 
 
-def qualification_client(**claims: Any) -> Client:
+def qualification_client(base_url: str | None = None, **claims: Any) -> Client:
     return client_with(
-        lambda: sign_credentials(client_id(), signing_secret(), **dict(claims))
+        lambda: sign_credentials(client_id(), signing_secret(), **dict(claims)),
+        base_url,
     )
 
 
-# Positional-only, so a token's own "reference" claim can be passed too.
-async def connected_channel(channel_reference: str, /, **claims: Any) -> Channel:
-    channel = qualification_client(**claims).channel(channel_reference)
+# Positional-only, so a token's own "reference" claim can be passed too. A
+# channel added to opened is closed by the fixture even when the test fails.
+async def connected_channel(
+    channel_reference: str,
+    /,
+    base_url: str | None = None,
+    opened: list[Channel] | None = None,
+    **claims: Any,
+) -> Channel:
+    channel = qualification_client(base_url, **claims).channel(channel_reference)
+
+    if opened is not None:
+        opened.append(channel)
+
     await channel.connect()
 
     return channel
+
+
+async def started(waiter: Coroutine[Any, Any, Value]) -> asyncio.Future[Value]:
+    """Starts a wait so its listener is registered; await the result after the
+    action that causes the event."""
+    pending = asyncio.ensure_future(waiter)
+    await asyncio.sleep(0)
+
+    return pending
 
 
 async def wait_for(
@@ -184,3 +225,93 @@ async def next_error(
     timeout_s: float = 15,
 ) -> ChannelError:
     return await wait_for(channel.events().on_error, predicate, description, timeout_s)
+
+
+class DroppingProxy:
+    """Forwards TCP connections to the realtime service, and can break them:
+
+    - refusing: new connections close at once
+    - blackhole: new connections stay open but carry no bytes
+    - blackhole_open_links(): open connections stay open but carry no bytes
+    - stall_upstream(): the proxy stops reading what clients send, so their
+      socket buffers fill
+    - drop_all(): every open connection closes, as a network outage would
+    """
+
+    def __init__(self, host: str, port: int) -> None:
+        self.host = host
+        self.port = port
+        self.url = ""
+        self.refusing = False
+        self.blackhole = False
+        self._sockets: list[asyncio.StreamWriter] = []
+        self._silenced: set[asyncio.StreamWriter] = set()
+        self._upstream_flowing = asyncio.Event()
+        self._upstream_flowing.set()
+
+    async def link(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        if self.refusing:
+            writer.transport.abort()
+            return
+
+        self._sockets.append(writer)
+
+        if self.blackhole:
+            with contextlib.suppress(ConnectionError):
+                while await reader.read(65536):
+                    pass
+
+            writer.transport.abort()
+            return
+
+        upstream_reader, upstream_writer = await asyncio.open_connection(
+            self.host, self.port
+        )
+        self._sockets.append(upstream_writer)
+        await asyncio.gather(
+            self._pipe(reader, upstream_writer, from_client=True),
+            self._pipe(upstream_reader, writer, from_client=False),
+            return_exceptions=True,
+        )
+
+    async def _pipe(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        from_client: bool,
+    ) -> None:
+        with contextlib.suppress(ConnectionError):
+            while True:
+                if from_client:
+                    await self._upstream_flowing.wait()
+
+                data = await reader.read(65536)
+
+                if not data:
+                    break
+
+                if writer in self._silenced:
+                    continue
+
+                writer.write(data)
+                await writer.drain()
+
+        writer.transport.abort()
+
+    def blackhole_open_links(self) -> None:
+        self._silenced.update(self._sockets)
+
+    def stall_upstream(self, stalled: bool) -> None:
+        if stalled:
+            self._upstream_flowing.clear()
+        else:
+            self._upstream_flowing.set()
+
+    def drop_all(self) -> None:
+        for socket in self._sockets:
+            socket.transport.abort()
+
+        self._sockets.clear()
+        self._silenced.clear()

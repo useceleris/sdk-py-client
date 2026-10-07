@@ -89,6 +89,20 @@ class TestSegmentProxies:
         second.cancel()
         assert sockets[-1].sent_frames() == ["@SUB\n$4\nchat\n", "@UNSUB\n$4\nchat\n"]
 
+    async def test_multiplexes_segments_over_one_socket_another_channel_opens_another(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        setup.channel.segment("alpha").subscribe()
+        setup.channel.segment("beta").subscribe()
+        await setup.channel.segment("gamma").publish(b"x")
+        assert len(sockets) == 1
+        assert len(sockets[-1].sent_frames()) == 3
+
+        await establish(
+            create_test_channel(timers, channel_reference="room-2"), sockets
+        )
+        assert len(sockets) == 2
+
     async def test_never_sends_sub_or_unsub_for_the_default_segment(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -109,31 +123,39 @@ class TestPublish:
             "@PUB\n$4\nchat\n$3\nm-1\n$2\nyo\n",
         ]
 
-    async def test_rejects_offline_publishes_without_queueing(
+    async def test_rejects_a_publish_with_not_connected_outside_recovery(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
-        idle = create_test_channel(timers)
-        error = await failure_of(publish(idle.channel.default_segment(), b"x"))
-        assert isinstance(error, CelerisConnectionError)
-        assert error.code == "NotConnected"
-
-        setup = await establish(create_test_channel(timers), sockets)
+        setup = create_test_channel(timers, maximum_reconnect_attempts=1)
         segment = setup.channel.segment("chat")
-        sockets[-1].disconnect()
-        assert setup.channel.state == "reconnecting"
 
-        error = await failure_of(publish(segment, b"x"))
-        assert isinstance(error, CelerisConnectionError)
-        assert (error.code, str(error)) == (
-            "NotConnected",
-            "Channel is not connected; it is reconnecting.",
-        )
+        async def assert_refused(state: str) -> None:
+            error = await failure_of(publish(segment, b"x"))
+            assert isinstance(error, CelerisConnectionError)
+            assert (error.code, str(error)) == (
+                "NotConnected",
+                f"Channel is not connected; it is {state}.",
+            )
+
+        await assert_refused("idle")
+
+        connecting = asyncio.ensure_future(setup.channel.connect())
+        await flush()
+        await assert_refused("connecting")
+
+        sockets[-1].open()
+        await connecting
+        sockets[-1].disconnect()
+        await timers.advance(0)
+        sockets[-1].fail()
+        await flush()
+        await assert_refused("failed")
 
         await setup.channel.close()
-        error = await failure_of(publish(segment, b"x"))
-        assert isinstance(error, CelerisConnectionError)
-        assert error.code == "NotConnected"
-        sockets[-1].send.assert_not_called()
+        await assert_refused("closed")
+
+        for socket in sockets:
+            socket.send.assert_not_called()
 
     async def test_rejects_invalid_options_before_writing(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
@@ -176,7 +198,7 @@ class TestPublish:
         assert isinstance(error, CelerisConnectionError)
         assert (error.code, str(error)) == (
             "Backpressure",
-            "64 publishes are already waiting to be sent. Retry once some have "
+            "The publish queue is full (size 64). Retry once some publishes have "
             "gone out.",
         )
         assert socket.send.call_count == 64
@@ -604,6 +626,120 @@ class TestDeliveryAndDedup:
         assert delivered == ["al-1", "al-2"]
 
 
+class TestChannelWideDelivery:
+    async def test_receives_every_segments_deliveries_with_or_without_listeners(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket]
+    ) -> None:
+        seen: list[str] = []
+
+        def record(payload: bytes, metadata: MessageMetadata) -> None:
+            seen.append(f"{metadata.segment_id}:{payload.decode()}")
+
+        setup.channel.events().on_message(record)
+        setup.channel.segment("chat").on_message(lambda payload, metadata: None)
+
+        sockets[-1].receive(message_frame("chat", "id-1", "hi"))
+        sockets[-1].receive(message_frame("default", "id-2", "yo"))
+        sockets[-1].receive(message_frame("joined-by-publish", "id-3", "ok"))
+
+        assert seen == ["chat:hi", "default:yo", "joined-by-publish:ok"]
+
+    async def test_runs_after_the_segments_listeners_in_the_same_dispatch(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket]
+    ) -> None:
+        order: list[str] = []
+        setup.channel.events().on_message(
+            lambda payload, metadata: order.append("channel")
+        )
+        setup.channel.segment("chat").on_message(
+            lambda payload, metadata: order.append("segment")
+        )
+
+        sockets[-1].receive(message_frame("chat", "id-1", "x"))
+
+        assert order == ["segment", "channel"]
+
+    async def test_sees_a_duplicate_once_and_never_a_delivery_without_an_id(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket]
+    ) -> None:
+        delivered: list[str] = []
+        setup.channel.events().on_message(
+            lambda payload, metadata: delivered.append(metadata.message_id)
+        )
+
+        sockets[-1].receive(message_frame("chat", "id-1", "x"))
+        sockets[-1].receive(message_frame("other", "id-1", "x"))
+        sockets[-1].receive(message_frame("chat", None, "x"))
+
+        assert delivered == ["id-1"]
+
+    async def test_contains_a_raising_listener_and_stops_after_disposal(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket]
+    ) -> None:
+        errors: list[ChannelError] = []
+        delivered: list[str] = []
+        setup.channel.events().on_error(errors.append)
+
+        def raise_failure(payload: bytes, metadata: MessageMetadata) -> None:
+            raise RuntimeError("listener-secret")
+
+        stop_raising = setup.channel.events().on_message(raise_failure)
+        stop_recording = setup.channel.events().on_message(
+            lambda payload, metadata: delivered.append(metadata.message_id)
+        )
+
+        sockets[-1].receive(message_frame("chat", "id-1", "x"))
+        stop_raising()
+        stop_recording()
+        sockets[-1].receive(message_frame("chat", "id-2", "x"))
+
+        assert delivered == ["id-1"]
+        assert len(errors) == 1
+        assert str(errors[0]) == LISTENER_FAILURE
+        assert setup.channel.state == "connected"
+
+    async def test_puts_nothing_on_the_wire_for_a_listener_alone(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket]
+    ) -> None:
+        setup.channel.segment("chat").on_message(lambda payload, metadata: None)
+        setup.channel.events().on_message(lambda payload, metadata: None)
+
+        sockets[-1].send.assert_not_called()
+
+    async def test_removes_only_its_own_channel_listener(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket]
+    ) -> None:
+        delivered: list[str] = []
+        remove_channel_listener = setup.channel.events().on_message(
+            lambda payload, metadata: delivered.append("removed")
+        )
+        setup.channel.events().on_message(
+            lambda payload, metadata: delivered.append("channel")
+        )
+        setup.channel.segment("chat").on_message(
+            lambda payload, metadata: delivered.append("segment")
+        )
+        setup.channel.segment("chat").subscribe()
+
+        remove_channel_listener()
+        remove_channel_listener()
+        sockets[-1].receive(message_frame("chat", "id-1", "x"))
+
+        assert delivered == ["segment", "channel"]
+        assert sockets[-1].sent_frames() == ["@SUB\n$4\nchat\n"]
+
+    # The server decides what arrives; the SDK never gates on subscriptions.
+    async def test_delivers_whatever_the_subscription_state(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket]
+    ) -> None:
+        delivered = record_ids(setup.channel.segment("chat"))
+        setup.channel.segment("chat").subscribe().cancel()
+
+        sockets[-1].receive(message_frame("chat", "id-1", "x"))
+
+        assert delivered == ["id-1"]
+
+
 def rate_limit_frame() -> bytes:
     return error_frame("RateLimitError", "Rate limit exceeded")
 
@@ -718,25 +854,6 @@ class TestRateLimitRecovery:
         assert isinstance(await failure_of(pending), asyncio.CancelledError)
         await timers.advance(1_000)
         socket.send.assert_not_called()
-
-    async def test_rejects_queued_publishes_when_the_connection_drops(
-        self, setup: ChannelSetup, sockets: list[FakeWebSocket]
-    ) -> None:
-        socket = sockets[-1]
-        socket.receive(rate_limit_frame())
-        pending = publish(setup.channel.segment("chat"), b"x")
-        await flush()
-
-        socket.disconnect()
-
-        error = await failure_of(pending)
-        assert isinstance(error, CelerisConnectionError)
-        assert (error.code, str(error)) == (
-            "NotConnected",
-            "Connection lost before the publish was sent; publish again once the "
-            "channel reconnects.",
-        )
-        assert setup.channel.state == "reconnecting"
 
     async def test_rejects_queued_publishes_when_the_channel_closes(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
@@ -1016,6 +1133,216 @@ class TestRateLimitRecovery:
         assert setup.channel.state == "connected"
         assert sockets[-1].sent_frames() == ["@SUB\n$4\nchat\n"]
         assert errors == []
+
+
+# Holds the fake writer full: any send is refused as backpressure.
+FULL_BUFFER = 2 * 1024 * 1024
+
+
+def publish_frame(segment_id: str, message_id: str, body: str) -> str:
+    return (
+        f"@PUB\n${len(segment_id)}\n{segment_id}\n${len(message_id)}\n{message_id}"
+        f"\n${len(body)}\n{body}\n"
+    )
+
+
+async def start_reconnect_attempt(
+    sockets: list[FakeWebSocket], timers: FakeTimers
+) -> FakeWebSocket:
+    """Runs the scheduled attempt: randomness is 0, so its delay is zero."""
+    socket_count = len(sockets)
+    await timers.advance(0)
+    assert len(sockets) == socket_count + 1
+    return sockets[-1]
+
+
+async def reconnect(sockets: list[FakeWebSocket], timers: FakeTimers) -> None:
+    (await start_reconnect_attempt(sockets, timers)).open()
+    await flush()
+
+
+class TestPublishesAcrossAReconnect:
+    """QUEUE-01: a publish not yet given to a socket waits for the next one."""
+
+    async def test_queues_a_publish_while_reconnecting_and_sends_it_after_the_reconnect(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        sockets[-1].disconnect()
+        assert setup.channel.state == "reconnecting"
+
+        published = publish(setup.channel.segment("chat"), b"x")
+        await flush()
+        assert not published.done()
+
+        await reconnect(sockets, timers)
+        await published
+        assert setup.channel.state == "connected"
+        assert sockets[-1].sent_frames() == [publish_frame("chat", "generated-1", "x")]
+
+    async def test_sends_publishes_waiting_behind_a_full_writer_after_the_reconnect_in_order(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        sockets[-1].buffered_amount = FULL_BUFFER
+        chat = setup.channel.segment("chat")
+        published = [publish(chat, body) for body in (b"a", b"b", b"c")]
+        await flush()
+
+        sockets[-1].disconnect()
+        await reconnect(sockets, timers)
+        await asyncio.gather(*published)
+
+        assert sockets[-1].sent_frames() == [
+            publish_frame("chat", "generated-1", "a"),
+            publish_frame("chat", "generated-2", "b"),
+            publish_frame("chat", "generated-3", "c"),
+        ]
+
+    async def test_restores_every_subscription_before_any_queued_publish(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        setup.channel.segment("chat").subscribe()
+        setup.channel.segment("news").subscribe()
+        setup.channel.segment("lobby").subscribe_presence()
+        await flush()
+
+        # Queued before the drop, to a segment the restoration subscribes.
+        sockets[-1].buffered_amount = FULL_BUFFER
+        before_drop = publish(setup.channel.segment("chat"), b"a")
+        await flush()
+        sockets[-1].disconnect()
+        during_outage = publish(setup.channel.segment("news"), b"b")
+
+        await reconnect(sockets, timers)
+        await asyncio.gather(before_drop, during_outage)
+
+        assert sockets[-1].sent_frames() == [
+            "@SUB\n$4\nchat\n",
+            "@SUB\n$4\nnews\n",
+            "@PRES_SUB\n$5\nlobby\n",
+            publish_frame("chat", "generated-1", "a"),
+            publish_frame("news", "generated-2", "b"),
+        ]
+
+    async def test_refuses_a_publish_while_reconnecting_with_backpressure_when_full(
+        self, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        setup = await establish(
+            create_test_channel(timers, publish_queue_size=1), sockets
+        )
+        sockets[-1].disconnect()
+        chat = setup.channel.segment("chat")
+        queued = publish(chat, b"a")
+        await flush()
+
+        error = await failure_of(publish(chat, b"b"))
+        assert isinstance(error, CelerisConnectionError)
+        assert (error.code, str(error)) == (
+            "Backpressure",
+            "The publish queue is full (size 1). Retry once some publishes have "
+            "gone out.",
+        )
+
+        await reconnect(sockets, timers)
+        await queued
+        assert sockets[-1].sent_frames() == [publish_frame("chat", "generated-1", "a")]
+
+    async def test_keeps_the_queue_through_a_failed_attempt_and_sends_it_on_the_next(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        sockets[-1].disconnect()
+        published = publish(setup.channel.segment("chat"), b"x")
+
+        (await start_reconnect_attempt(sockets, timers)).fail()
+        await flush()
+        assert setup.channel.state == "reconnecting"
+        assert not published.done()
+
+        await reconnect(sockets, timers)
+        await published
+        assert sockets[-1].sent_frames() == [publish_frame("chat", "generated-1", "x")]
+
+    async def test_rejects_each_queued_publish_with_the_terminal_error(
+        self, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        setup = await establish(
+            create_test_channel(timers, maximum_reconnect_attempts=1), sockets
+        )
+        errors: list[ChannelError] = []
+        setup.channel.events().on_error(errors.append)
+        sockets[-1].disconnect()
+        chat = setup.channel.segment("chat")
+        published = [publish(chat, body) for body in (b"a", b"b")]
+
+        (await start_reconnect_attempt(sockets, timers)).fail()
+        await flush()
+
+        assert setup.channel.state == "failed"
+        (error,) = errors
+        assert isinstance(error, CelerisConnectionError)
+        assert error.code == "Transport"
+
+        for pending in published:
+            assert await failure_of(pending) is error
+
+    async def test_rejects_queued_publishes_with_cancelled_when_closed_while_reconnecting(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket]
+    ) -> None:
+        sockets[-1].disconnect()
+        published = publish(setup.channel.segment("chat"), b"x")
+        await flush()
+
+        await setup.channel.close()
+
+        error = await failure_of(published)
+        assert isinstance(error, CelerisConnectionError)
+        assert (error.code, str(error)) == (
+            "Cancelled",
+            "Channel closed before the publish was sent.",
+        )
+
+    async def test_starts_an_explicit_connect_after_failed_with_an_empty_queue(
+        self, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        setup = await establish(
+            create_test_channel(timers, maximum_reconnect_attempts=1), sockets
+        )
+        sockets[-1].disconnect()
+        published = publish(setup.channel.segment("chat"), b"x")
+
+        (await start_reconnect_attempt(sockets, timers)).fail()
+        await flush()
+        assert isinstance(await failure_of(published), CelerisConnectionError)
+        assert setup.channel.state == "failed"
+
+        await establish(setup, sockets)
+        await timers.advance(1_000)
+
+        assert sockets[-1].sent_frames() == []
+
+    async def test_never_resends_a_publish_the_previous_socket_was_given(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        await setup.channel.segment("chat").publish(b"x")
+        assert sockets[-1].sent_frames() == [publish_frame("chat", "generated-1", "x")]
+
+        sockets[-1].disconnect()
+        await reconnect(sockets, timers)
+        await timers.advance(5_000)
+
+        assert sockets[-1].sent_frames() == []
+
+    async def test_withdraws_a_publish_queued_while_reconnecting_when_cancelled(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        sockets[-1].disconnect()
+        published = publish(setup.channel.segment("chat"), b"x")
+        await flush()
+
+        published.cancel()
+
+        assert isinstance(await failure_of(published), asyncio.CancelledError)
+        await reconnect(sockets, timers)
+        assert sockets[-1].sent_frames() == []
 
 
 async def test_contains_a_listener_that_raises_cancelled_error(

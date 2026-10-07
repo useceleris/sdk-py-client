@@ -168,3 +168,26 @@ async def test_a_cancelled_close_still_completes(
     await timers.advance(5_000)
     await second
     assert channel.state == "closed"
+
+
+async def test_refuses_a_publish_while_closing_and_writes_nothing(
+    sockets: list[FakeWebSocket], timers: FakeTimers
+) -> None:
+    channel = (await establish(create_test_channel(timers), sockets)).channel
+    sockets[0].close.side_effect = None
+    closing = asyncio.ensure_future(channel.close())
+    await flush()
+    assert channel.state == "closing"
+
+    error = await failure_of(
+        asyncio.ensure_future(channel.default_segment().publish(b"x"))
+    )
+    assert isinstance(error, CelerisConnectionError)
+    assert (error.code, str(error)) == (
+        "NotConnected",
+        "Channel is not connected; it is closing.",
+    )
+    sockets[0].send.assert_not_called()
+
+    await timers.advance(5_000)
+    await closing

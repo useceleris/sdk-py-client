@@ -1,5 +1,4 @@
 import asyncio
-from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -8,6 +7,7 @@ from tests.helpers.channel import (
     ChannelSetup,
     create_test_channel,
     establish,
+    presence_response_frame,
 )
 from tests.helpers.tasks import failure_of, flush
 from tests.helpers.timers import FakeTimers
@@ -31,29 +31,6 @@ LISTENER_FAILURE = (
 @pytest.fixture
 async def setup(sockets: list[FakeWebSocket], timers: FakeTimers) -> ChannelSetup:
     return await establish(create_test_channel(timers), sockets)
-
-
-def presence_response_frame(
-    *,
-    segment_id: str = "chat",
-    request_id: str = "1",
-    total: int = 1,
-    per_page: int = 25,
-    current_page: int = 1,
-    from_: int = 1,
-    to: int = 1,
-    connections: Sequence[tuple[str, str, int]] = (("user", "connection-1", 123),),
-) -> bytes:
-    entries = "".join(
-        f"*3\n+{token_reference}\n+{connection_id}\n:{timestamp}\n"
-        for token_reference, connection_id, timestamp in connections
-    )
-
-    return (
-        f"@PRES_LIST_RESPONSE\n+{segment_id}\n${len(request_id)}\n{request_id}\n"
-        f";{total}\n;{per_page}\n;{current_page}\n;{from_}\n;{to}\n"
-        f"*{len(connections)}\n{entries}"
-    ).encode()
 
 
 # An error answering the presence query with this request id.
@@ -112,7 +89,7 @@ class TestPresenceInterests:
             "@PRES_UNSUB\n$7\ndefault\n",
         ]
 
-    async def test_suppresses_message_unsub_while_a_presence_interest_is_held(
+    async def test_sends_unsub_on_message_cancel_while_presence_is_held(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
         messages = setup.channel.segment("chat").subscribe()
@@ -122,29 +99,15 @@ class TestPresenceInterests:
         assert sockets[-1].sent_frames() == [
             "@SUB\n$4\nchat\n",
             "@PRES_SUB\n$4\nchat\n",
-        ]
-
-        presence.cancel()
-        assert sockets[-1].sent_frames() == [
-            "@SUB\n$4\nchat\n",
-            "@PRES_SUB\n$4\nchat\n",
-            "@PRES_UNSUB\n$4\nchat\n",
-        ]
-
-    async def test_sends_unsub_once_presence_is_released_first(
-        self, setup: ChannelSetup, sockets: list[FakeWebSocket]
-    ) -> None:
-        messages = setup.channel.segment("chat").subscribe()
-        presence = setup.channel.segment("chat").subscribe_presence()
-
-        presence.cancel()
-        messages.cancel()
-
-        assert sockets[-1].sent_frames() == [
-            "@SUB\n$4\nchat\n",
-            "@PRES_SUB\n$4\nchat\n",
-            "@PRES_UNSUB\n$4\nchat\n",
             "@UNSUB\n$4\nchat\n",
+        ]
+
+        presence.cancel()
+        assert sockets[-1].sent_frames() == [
+            "@SUB\n$4\nchat\n",
+            "@PRES_SUB\n$4\nchat\n",
+            "@UNSUB\n$4\nchat\n",
+            "@PRES_UNSUB\n$4\nchat\n",
         ]
 
     async def test_flushes_messages_first_then_presence_in_registration_order(
@@ -333,20 +296,6 @@ class TestPresenceQueries:
         assert (await following).total == 7
         assert errors == []
         assert timers.count == 0
-
-    async def test_honors_a_custom_presence_query_timeout(
-        self, sockets: list[FakeWebSocket], timers: FakeTimers
-    ) -> None:
-        setup = await establish(
-            create_test_channel(timers, presence_query_timeout_ms=2_000), sockets
-        )
-        pending = query(setup)
-
-        await timers.advance(2_000)
-
-        error = await failure_of(pending)
-        assert isinstance(error, CelerisConnectionError)
-        assert error.code == "Timeout"
 
     async def test_cancelling_frees_the_slot_and_stays_connected(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers

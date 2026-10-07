@@ -1,3 +1,6 @@
+import json
+from collections.abc import Callable
+
 import pytest
 
 from tests.live.helpers import (
@@ -8,10 +11,19 @@ from tests.live.helpers import (
     now_ms,
     qualification_client,
     sign_credentials,
+    sign_raw_payload,
     signing_secret,
     unique_channel_reference,
+    websocket_url,
 )
-from useceleris_client import CelerisConnectionError, read_text
+from useceleris_client import (
+    CelerisConnectionError,
+    Channel,
+    CredentialRequest,
+    Credentials,
+    create_client,
+    read_text,
+)
 
 pytestmark = pytest.mark.live
 
@@ -105,3 +117,90 @@ async def test_accepts_a_channel_inside_the_tokens_restriction() -> None:
 
     assert channel.state == "connected"
     await channel.close()
+
+
+@pytest.mark.parametrize(
+    "payload_text",
+    [
+        pytest.param(
+            lambda: json.dumps({"timestamp": now_ms(), "reference": ""}),
+            id="an_empty_reference",
+        ),
+        pytest.param(lambda: "not json", id="a_payload_that_is_not_json"),
+        pytest.param(
+            lambda: json.dumps({"reference": "x"}), id="a_payload_without_a_timestamp"
+        ),
+        pytest.param(
+            lambda: json.dumps({"timestamp": "now"}), id="a_timestamp_that_is_a_string"
+        ),
+        pytest.param(
+            lambda: json.dumps({"timestamp": now_ms() + 30_000}),
+            id="a_timestamp_30_seconds_in_the_future",
+        ),
+    ],
+)
+async def test_refuses_these_claims_as_transport(
+    payload_text: Callable[[], str],
+) -> None:
+    channel = client_with(
+        lambda: sign_raw_payload(client_id(), signing_secret(), payload_text())
+    ).channel(unique_channel_reference("refused-claims"))
+
+    with pytest.raises(CelerisConnectionError) as caught:
+        await channel.connect()
+
+    assert caught.value.code == "Transport"
+    assert channel.state == "failed"
+
+
+async def test_accepts_an_empty_channel_restriction_which_permits_every_channel(
+    opened: list[Channel],
+) -> None:
+    channel = await connected_channel(
+        unique_channel_reference("any"), opened=opened, channel_references=[]
+    )
+
+    assert channel.state == "connected"
+
+
+async def test_accepts_a_channel_that_is_one_of_several_in_the_restriction(
+    opened: list[Channel],
+) -> None:
+    reference = unique_channel_reference("several")
+    channel = await connected_channel(
+        reference,
+        opened=opened,
+        channel_references=["some-other-channel", reference],
+    )
+
+    assert channel.state == "connected"
+
+
+async def test_requests_fresh_credentials_for_every_explicit_connect(
+    opened: list[Channel],
+) -> None:
+    requests: list[CredentialRequest] = []
+
+    async def provide(request: CredentialRequest) -> Credentials:
+        requests.append(request)
+
+        return sign_credentials(client_id(), signing_secret())
+
+    client = create_client(
+        base_url=websocket_url(),
+        allow_insecure_loopback=True,
+        credential_provider=provide,
+    )
+    reference = unique_channel_reference("fresh")
+
+    first = client.channel(reference)
+    opened.append(first)
+    await first.connect()
+    await first.close()
+    second = client.channel(reference)
+    opened.append(second)
+    await second.connect()
+    await second.close()
+
+    assert [request.reason for request in requests] == ["initial", "initial"]
+    assert all(request.channel_reference == reference for request in requests)

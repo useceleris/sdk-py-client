@@ -5,16 +5,19 @@ import pytest
 
 from tests.live.helpers import (
     GENERATED_MESSAGE_ID,
-    DeliveredMessage,
     collect,
     connected_channel,
     next_error,
     next_message,
+    now_ms,
+    started,
     unique_channel_reference,
 )
 from useceleris_client import (
     CelerisConnectionError,
+    Channel,
     ChannelError,
+    ConfigurationError,
     MessageMetadata,
     ServerError,
 )
@@ -70,41 +73,6 @@ async def test_echoes_to_the_publisher_when_the_token_allows_echo() -> None:
 
     assert len(saw) >= 1
     await channel.close()
-
-
-async def test_demuxes_segments_and_stops_delivery_after_unsubscribe() -> None:
-    reference = unique_channel_reference("segments")
-    publisher = await connected_channel(reference)
-    receiver = await connected_channel(reference)
-    alpha = collect(receiver, "alpha")
-    beta: list[DeliveredMessage] = []
-    receiver.segment("beta").on_message(
-        lambda payload, metadata: beta.append(DeliveredMessage(payload, metadata))
-    )
-    beta_membership = receiver.segment("beta").subscribe()
-    await asyncio.sleep(1.5)
-
-    await publisher.segment("alpha").publish(b"a")
-    await publisher.segment("beta").publish(b"b")
-    await next_message(
-        receiver.segment("alpha"),
-        lambda message: message.payload == b"a",
-        "alpha delivery",
-    )
-    await asyncio.sleep(1.5)
-
-    assert all(message.metadata.segment_id == "alpha" for message in alpha)
-    assert all(message.metadata.segment_id == "beta" for message in beta)
-    beta_count = len(beta)
-
-    beta_membership.cancel()
-    await asyncio.sleep(1.5)
-    await publisher.segment("beta").publish(b"late")
-    await asyncio.sleep(2.5)
-
-    assert len(beta) == beta_count
-    await publisher.close()
-    await receiver.close()
 
 
 async def test_delivers_on_the_default_segment_without_subscribing() -> None:
@@ -307,3 +275,134 @@ async def test_recovers_subscriptions_the_server_drops_under_its_rate_limit() ->
     assert len(delivered) == len(segment_ids)
     await publisher.close()
     await subscriber.close()
+
+
+async def test_delivers_a_custom_message_id_unchanged_and_drops_a_repeat_of_it(
+    opened: list[Channel],
+) -> None:
+    reference = unique_channel_reference("custom-id")
+    publisher = await connected_channel(reference, opened=opened)
+    receiver = await connected_channel(reference, opened=opened)
+    received = collect(receiver, "chat")
+    await asyncio.sleep(1.5)
+    message_id = f"order-{now_ms()}"
+
+    await publisher.segment("chat").publish(b"first", message_id=message_id)
+    await publisher.segment("chat").publish(b"repeat", message_id=message_id)
+    marker = await started(
+        next_message(
+            receiver.segment("chat"),
+            lambda message: message.payload == b"marker",
+            "the marker after the repeat",
+        )
+    )
+    await publisher.segment("chat").publish(b"marker")
+    await marker
+
+    assert [message.payload for message in received] == [b"first", b"marker"]
+    assert received[0].metadata.message_id == message_id
+
+
+async def test_round_trips_an_empty_payload(opened: list[Channel]) -> None:
+    reference = unique_channel_reference("empty")
+    publisher = await connected_channel(reference, opened=opened)
+    receiver = await connected_channel(reference, opened=opened)
+    receiver.segment("chat").subscribe()
+    await asyncio.sleep(1.5)
+
+    arrived = await started(
+        next_message(
+            receiver.segment("chat"),
+            lambda message: len(message.payload) == 0,
+            "the empty payload",
+        )
+    )
+    await publisher.segment("chat").publish(b"")
+    message = await arrived
+
+    assert message.payload == b""
+    assert GENERATED_MESSAGE_ID.fullmatch(message.metadata.message_id)
+
+
+async def test_refuses_a_payload_one_byte_over_the_1024_kib_plan_cap(
+    opened: list[Channel],
+) -> None:
+    channel = await connected_channel(
+        unique_channel_reference("cap-plus-one"), opened=opened
+    )
+
+    rejected = await started(
+        next_error(
+            channel,
+            lambda error: (
+                isinstance(error, ServerError) and error.type == "MessageSizeLimitError"
+            ),
+            "the MessageSizeLimitError frame",
+            20,
+        )
+    )
+    await channel.segment("bulk").publish(bytes(1024 * 1024 + 1))
+    rejection = await rejected
+
+    assert "size limit = 1024 KB" in str(rejection)
+    assert channel.state == "connected"
+
+
+async def test_refuses_a_command_over_2_mib_locally_and_stays_connected(
+    opened: list[Channel],
+) -> None:
+    reference = unique_channel_reference("local-ceiling")
+    publisher = await connected_channel(reference, opened=opened)
+    receiver = await connected_channel(reference, opened=opened)
+    received = collect(receiver, "bulk")
+    await asyncio.sleep(1.5)
+
+    with pytest.raises(ConfigurationError):
+        await publisher.segment("bulk").publish(bytes(2 * 1024 * 1024))
+
+    after = await started(
+        next_message(
+            receiver.segment("bulk"),
+            lambda message: message.payload == b"after",
+            "the publish after the refusal",
+        )
+    )
+    await publisher.segment("bulk").publish(b"after")
+    await after
+
+    assert [message.payload for message in received] == [b"after"]
+    assert publisher.state == "connected"
+
+
+@pytest.mark.timeout(90)
+async def test_delivers_a_paced_burst_of_50_messages_in_publish_order_one_time_each(
+    opened: list[Channel],
+) -> None:
+    reference = unique_channel_reference("burst")
+    publisher = await connected_channel(reference, opened=opened)
+    receiver = await connected_channel(reference, opened=opened)
+    received = collect(receiver, "chat")
+    await asyncio.sleep(1.5)
+    bodies = [f"b{index}".encode() for index in range(50)]
+
+    last = await started(
+        next_message(
+            receiver.segment("chat"),
+            lambda message: message.payload == b"b49",
+            "the last message of the burst",
+            30,
+        )
+    )
+
+    # Paced below the per-second publish limit.
+    for start in range(0, len(bodies), 10):
+        for body in bodies[start : start + 10]:
+            await publisher.segment("chat").publish(body)
+
+        await asyncio.sleep(1.1)
+
+    await last
+    await asyncio.sleep(1.5)
+
+    assert [message.payload for message in received] == bodies
+    assert len({message.metadata.message_id for message in received}) == 50

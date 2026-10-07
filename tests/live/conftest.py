@@ -1,9 +1,14 @@
+import asyncio
 import os
 import socket
+from collections.abc import AsyncIterator
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
+
+from tests.live.helpers import DroppingProxy, websocket_url
+from useceleris_client import Channel
 
 ENVIRONMENT_FILE = Path(__file__).resolve().parents[2] / ".env"
 
@@ -55,3 +60,27 @@ def realtime() -> str:
         )
 
     return os.environ["CELERIS_WS_URL"]
+
+
+@pytest.fixture
+async def proxy() -> AsyncIterator[DroppingProxy]:
+    """A dropping proxy in front of CELERIS_WS_URL, at its own url."""
+    target = urlsplit(websocket_url())
+    dropping = DroppingProxy(target.hostname or "localhost", target.port or 80)
+    server = await asyncio.start_server(dropping.link, "127.0.0.1", 0)
+    dropping.url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+
+    async with server:
+        yield dropping
+        dropping.stall_upstream(False)
+        dropping.drop_all()
+
+
+@pytest.fixture
+async def opened() -> AsyncIterator[list[Channel]]:
+    """Every channel a test opens, closed even when the test fails."""
+    channels: list[Channel] = []
+    yield channels
+
+    for channel in channels:
+        await channel.close()

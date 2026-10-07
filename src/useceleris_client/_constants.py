@@ -87,6 +87,10 @@ DEFAULT_CONNECT_TIMEOUT_MS = 15_000
 
 DEFAULT_PRESENCE_QUERY_TIMEOUT_MS = 10_000
 
+# The longest connect, reconnect or presence query timeout a client accepts
+# (CONFIG-01).
+MAXIMUM_TIMEOUT_MS = 15 * 60 * 1000
+
 DEFAULT_SEGMENT_ID = "default"
 
 # The command a presence query error names as its sub type (QUERY-01).
@@ -96,8 +100,12 @@ MAXIMUM_PRESENCE_PAGE_SIZE = 100
 
 MAXIMUM_CHANNEL_REFERENCE_LENGTH = 255
 
-# Recovery.
-MAXIMUM_RETRIES = 10
+# Recovery (CONFIG-01). Failed reconnect attempts allowed per budget before
+# the channel fails: the default, and the most maximum_reconnect_attempts
+# accepts.
+DEFAULT_MAXIMUM_RECONNECT_ATTEMPTS = 10
+
+MAXIMUM_RECONNECT_ATTEMPTS_CEILING = 100
 
 RETRY_BUDGET_RESET_MS = 60_000
 

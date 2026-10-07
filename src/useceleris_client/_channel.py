@@ -15,9 +15,7 @@ from useceleris_client._commands import IDENTIFIER, InterestCommand
 from useceleris_client._connection import ConnectionHandle, open_connection
 from useceleris_client._constants import (
     CLOSE_BUDGET_MS,
-    DEDUP_WINDOW_SIZE,
     DEFAULT_SEGMENT_ID,
-    MAXIMUM_RETRIES,
     PRESENCE_LIST_COMMAND,
     RATE_LIMIT_ERROR_TYPE,
     RETRY_BUDGET_RESET_MS,
@@ -194,11 +192,13 @@ class ChannelEventHandler:
         recovery_listeners: _ListenerSet[[RecoveryEvent]],
         notice_listeners: _ListenerSet[[ServerNotice]],
         error_listeners: _ListenerSet[[ChannelError]],
+        message_listeners: _ListenerSet[[bytes, MessageMetadata]],
     ) -> None:
         self._state_listeners = state_listeners
         self._recovery_listeners = recovery_listeners
         self._notice_listeners = notice_listeners
         self._error_listeners = error_listeners
+        self._message_listeners = message_listeners
 
     def on_state_change(
         self, listener: Callable[[ChannelState], None]
@@ -216,6 +216,9 @@ class ChannelEventHandler:
     def on_error(self, listener: Callable[[ChannelError], None]) -> Callable[[], None]:
         return self._error_listeners.add(listener)
 
+    def on_message(self, listener: MessageListener) -> Callable[[], None]:
+        return self._message_listeners.add(listener)
+
 
 @dataclass(frozen=True)
 class ChannelInternals:
@@ -223,7 +226,11 @@ class ChannelInternals:
     channel_reference: str
     allow_insecure_loopback: bool
     connect_timeout_ms: int
+    reconnect_timeout_ms: int
     presence_query_timeout_ms: int
+    publish_queue_size: int
+    deduplication_window_size: int
+    maximum_reconnect_attempts: int
     credential_provider: CredentialProvider
     clock: Callable[[], float]
     wall_clock: Callable[[], int]
@@ -246,7 +253,8 @@ class _PendingPresenceQuery:
 
 
 class _DedupWindow:
-    def __init__(self) -> None:
+    def __init__(self, window_size: int) -> None:
+        self._window_size = window_size
         # Insertion-ordered, so the first key is the oldest.
         self._identifiers: dict[str, None] = {}
 
@@ -258,7 +266,7 @@ class _DedupWindow:
 
         self._identifiers[identifier] = None
 
-        if len(self._identifiers) > DEDUP_WINDOW_SIZE:
+        if len(self._identifiers) > self._window_size:
             del self._identifiers[next(iter(self._identifiers))]
 
         return True
@@ -293,9 +301,10 @@ class Channel:
                 clock=internals.clock,
                 random=internals.random,
                 timers=internals.timers,
-            )
+            ),
+            publish_queue_size=internals.publish_queue_size,
         )
-        self._dedup_window = _DedupWindow()
+        self._dedup_window = _DedupWindow(internals.deduplication_window_size)
         self._message_listeners: dict[str, _ListenerSet[[bytes, MessageMetadata]]] = {}
         self._presence_listeners: dict[str, _ListenerSet[[PresenceEvent]]] = {}
         # Segment -> interest count, in first-registration order.
@@ -317,11 +326,15 @@ class Channel:
         self._notice_listeners: _ListenerSet[[ServerNotice]] = _ListenerSet(
             self._report_listener_failure
         )
+        self._channel_message_listeners: _ListenerSet[[bytes, MessageMetadata]] = (
+            _ListenerSet(self._report_listener_failure)
+        )
         self._handler = ChannelEventHandler(
             self._state_listeners,
             self._recovery_listeners,
             self._notice_listeners,
             self._error_listeners,
+            self._channel_message_listeners,
         )
         self._segment_delegates = SegmentDelegates(
             add_message_listener=self._add_message_listener,
@@ -470,7 +483,11 @@ class Channel:
                 on_message=lambda message: self._route_message(generation, message),
                 on_close=lambda: self._receive_socket_close(generation),
                 on_error=lambda error: self._receive_socket_error(generation, error),
-                timeout_ms=self._internals.connect_timeout_ms,
+                timeout_ms=(
+                    self._internals.reconnect_timeout_ms
+                    if recovery["reason"] == "reconnect"
+                    else self._internals.connect_timeout_ms
+                ),
                 timers=self._internals.timers,
                 cancellation=cancellation,
             )
@@ -502,8 +519,8 @@ class Channel:
                     "Restoring subscriptions failed: the socket refused a write.",
                 )
         except BaseException:
-            # A failed attempt leaves nothing queued for the next socket.
-            self._reset_command_queue_on_connection_loss()
+            # Waiting publishes stay for the next attempt (QUEUE-01).
+            self._command_queue.reset_connection_state()
             raise
         finally:
             if self._attempt_cancellation is cancellation:
@@ -589,14 +606,11 @@ class Channel:
         if segment_id == DEFAULT_SEGMENT_ID:
             return None
 
-        if segment_id in self._message_interests:
-            return {"command": "SUB", "segment_id": segment_id}
-
-        # A presence subscription keeps the segment joined for messages.
-        if segment_id in self._presence_interests:
-            return None
-
-        return {"command": "UNSUB", "segment_id": segment_id}
+        # Watching presence is not membership, so it never holds the segment.
+        return {
+            "command": "SUB" if segment_id in self._message_interests else "UNSUB",
+            "segment_id": segment_id,
+        }
 
     # The server's view of this connection's subscriptions is now unknown, so
     # the socket is replaced: reconnecting re-sends every subscription.
@@ -695,19 +709,12 @@ class Channel:
             )
         )
 
-    def _reset_command_queue_on_connection_loss(self) -> None:
-        self._command_queue.reset(
-            CelerisConnectionError(
-                "NotConnected",
-                "Connection lost before the publish was sent; publish again once "
-                "the channel reconnects.",
-            )
-        )
-
     async def _publish_to_segment(
         self, segment_id: str, payload: bytes, message_id: str | None
     ) -> None:
-        if self._state != "connected" or self._handle is None:
+        # While reconnecting, the publish waits in the queue for the next
+        # socket (QUEUE-01). Anywhere else no recovery is in progress.
+        if self._state not in ("connected", "reconnecting"):
             raise CelerisConnectionError(
                 "NotConnected", f"Channel is not connected; it is {self._state}."
             )
@@ -728,13 +735,12 @@ class Channel:
         await self._command_queue.publish(segment_id, data)
 
     # Restoration goes through the queue, so it waits for writer room and
-    # always reaches the server before any publish.
+    # reaches the server before any publish, messages first, then presence.
     def _flush_interests(self) -> None:
-        for segment_id in list(self._message_interests):
-            self._command_queue.queue_interest("message", segment_id)
-
-        for segment_id in list(self._presence_interests):
-            self._command_queue.queue_interest("presence", segment_id)
+        self._command_queue.restore_interests(
+            [("message", segment_id) for segment_id in self._message_interests]
+            + [("presence", segment_id) for segment_id in self._presence_interests]
+        )
 
     def _route_message(self, attempt_generation: int, message: ServerMessage) -> None:
         if attempt_generation != self._generation:
@@ -828,20 +834,19 @@ class Channel:
         if not self._dedup_window.record_if_new(message.message_id):
             return
 
-        listeners = self._message_listeners.get(message.segment_id)
-
-        if listeners is None:
-            return
-
-        listeners.dispatch(
-            message.payload,
-            MessageMetadata(
-                token_reference=message.token_reference,
-                segment_id=message.segment_id,
-                message_id=message.message_id,
-                timestamp=message.timestamp,
-            ),
+        metadata = MessageMetadata(
+            token_reference=message.token_reference,
+            segment_id=message.segment_id,
+            message_id=message.message_id,
+            timestamp=message.timestamp,
         )
+        segment_listeners = self._message_listeners.get(message.segment_id)
+
+        # The segment's listeners first, then the channel's (MSG-02).
+        if segment_listeners is not None:
+            segment_listeners.dispatch(message.payload, metadata)
+
+        self._channel_message_listeners.dispatch(message.payload, metadata)
 
     def _deliver_presence(self, event: PresenceNotifyFrame) -> None:
         listeners = self._presence_listeners.get(event.segment_id)
@@ -889,7 +894,7 @@ class Channel:
 
     def _enter_reconnecting(self) -> None:
         self._reject_presence_query_on_connection_loss()
-        self._reset_command_queue_on_connection_loss()
+        self._command_queue.reset_connection_state()
         now = self._internals.clock()
 
         if now - self._connected_at_monotonic >= RETRY_BUDGET_RESET_MS:
@@ -948,7 +953,7 @@ class Channel:
             ):
                 self._retries_used += 1
 
-                if self._retries_used >= MAXIMUM_RETRIES:
+                if self._retries_used >= self._internals.maximum_reconnect_attempts:
                     self._fail_terminal(error)
                     return
 
@@ -972,9 +977,10 @@ class Channel:
         self._set_state("connected")
         self._recovery_listeners.dispatch(RecoveryEvent(retry_index=attempt_index))
 
+    # Waiting publishes fail with the error on_error reports (QUEUE-01).
     def _fail_terminal(self, error: ChannelError) -> None:
         self._reject_presence_query_on_connection_loss()
-        self._reset_command_queue_on_connection_loss()
+        self._command_queue.reset(error)
         self._generation += 1
         self._clear_retry_timer()
         self._emit_error(error)

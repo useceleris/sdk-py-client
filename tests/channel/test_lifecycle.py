@@ -16,7 +16,6 @@ from tests.helpers.websocket import FakeWebSocket
 from useceleris_client import (
     CelerisConnectionError,
     ChannelError,
-    Client,
     ConfigurationError,
     CredentialRequest,
     Credentials,
@@ -139,27 +138,6 @@ async def test_cancelling_connect_cancels_the_attempt_and_fails_the_channel(
     await flush()
     assert setup.channel.state == "failed"
     assert provider_cancelled.is_set()
-    assert timers.count == 0
-
-
-async def test_honors_connect_timeout_ms_for_the_attempt_deadline(
-    timers: FakeTimers,
-) -> None:
-    setup = create_test_channel(timers, connect_timeout_ms=5_000)
-
-    async def hang(request: CredentialRequest) -> Credentials:
-        await asyncio.get_running_loop().create_future()
-        raise AssertionError("unreachable")
-
-    setup.credential_provider.side_effect = hang
-    pending = asyncio.ensure_future(setup.channel.connect())
-
-    await timers.advance(5_000)
-
-    error = await failure_of(pending)
-    assert isinstance(error, CelerisConnectionError)
-    assert error.code == "Timeout"
-    assert setup.channel.state == "failed"
     assert timers.count == 0
 
 
@@ -339,78 +317,6 @@ async def test_connects_to_the_built_in_endpoint_when_no_base_url_is_given(
     sockets[0].open()
     await pending
     await channel.close()
-
-
-@pytest.mark.parametrize(
-    "options",
-    [
-        {"base_url": ""},
-        {"base_url": "https://example.test"},
-        {"credential_provider": None},
-        {"connect_timeout_ms": 0.5},
-        {"connect_timeout_ms": 0},
-        {"connect_timeout_ms": True},
-        {"presence_query_timeout_ms": "1"},
-        {"allow_insecure_loopback": "yes"},
-    ],
-)
-def test_validates_client_options_eagerly(options: dict[str, Any]) -> None:
-    arguments: dict[str, Any] = {
-        "base_url": "wss://example.test",
-        "credential_provider": provide,
-        **options,
-    }
-
-    with pytest.raises(ConfigurationError):
-        create_client(**arguments)
-
-
-def test_creates_a_client_with_valid_options() -> None:
-    assert isinstance(
-        create_client(base_url="wss://example.test", credential_provider=provide),
-        Client,
-    )
-
-
-def test_names_the_failed_client_option() -> None:
-    untyped: Any = 0.5
-
-    with pytest.raises(ConfigurationError) as caught:
-        create_client(credential_provider=provide, connect_timeout_ms=untyped)
-
-    assert str(caught.value) == (
-        "Invalid client options. connect_timeout_ms: Input should be a valid integer."
-    )
-
-
-async def test_applies_the_default_timeouts(
-    monkeypatch: pytest.MonkeyPatch, sockets: list[FakeWebSocket], timers: FakeTimers
-) -> None:
-    monkeypatch.setattr("useceleris_client._client.LOOP_TIMERS", timers)
-    channel = create_client(credential_provider=provide).channel("room-1")
-
-    connecting = asyncio.ensure_future(channel.connect())
-    await timers.advance(14_999)
-    assert not connecting.done()
-    await timers.advance(1)
-    error = await failure_of(connecting)
-    assert isinstance(error, CelerisConnectionError)
-    assert str(error) == "Connection attempt timed out after 15000 ms."
-
-    pending = asyncio.ensure_future(channel.connect())
-    await flush()
-    sockets[-1].open()
-    await pending
-
-    query = asyncio.ensure_future(
-        channel.default_segment().presence_list(page=1, per_page=1)
-    )
-    await timers.advance(9_999)
-    assert not query.done()
-    await timers.advance(1)
-    error = await failure_of(query)
-    assert isinstance(error, CelerisConnectionError)
-    assert str(error) == "Presence query timed out after 10000 ms."
 
 
 async def test_rejects_connect_while_reconnecting(

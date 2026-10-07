@@ -126,11 +126,19 @@ await chat.publish(json_payload({"hello": "world"}))
 lobby.on_message(lambda payload, metadata: print("lobby:", metadata.message_id))
 await lobby.publish(text_payload("hello lobby"))
 
-# Tear down. Releasing the last message interest in a named segment sends
-# UNSUB, unless a presence interest still holds it; cancelling presence never
-# sends UNSUB. The default segment is never left: the client sends no SUB or
-# UNSUB for it.
+# A channel listener receives all messages from all segments of this
+# connection. This includes the segments that the connection joins when it
+# publishes. The segment listeners get each message first.
+remove_channel_listener = channel.events().on_message(
+    lambda payload, metadata: print(metadata.segment_id, read_json(payload))
+)
+
+# To finish, remove the listeners and cancel the subscription. When you
+# release the last message interest in a named segment, the SDK sends UNSUB.
+# When you cancel presence, the SDK does not send UNSUB. The SDK sends no SUB
+# or UNSUB for the default segment.
 stop_chat()
+remove_channel_listener()
 membership.cancel()  # idempotent
 ```
 
@@ -159,8 +167,10 @@ from useceleris_client import PresenceEvent, ServerNotice, read_text
 
 chat = channel.segment("chat")
 
-# Presence interest. Server-side this ALSO joins the segment for messages;
-# cancelling presence does not leave it.
+# Presence interest. A presence subscription does not join the segment. It
+# does not give you messages, and this connection does not show in the
+# presence of the segment because of it. To receive the messages of the
+# segment, also call subscribe().
 watching = chat.subscribe_presence()
 
 # The default segment is where presence differs from messages: joining on
@@ -199,7 +209,7 @@ stop_presence()
 stop_notices()
 ```
 
-Two things to know before building on presence events. They are **node-local**: the server fans notifications out only to watchers on the same node, while `presence_list()` aggregates across the cluster, so in a multi-node deployment a watcher can miss a joiner on another node, and reconciling events against a snapshot drifts. And suppression is per connection, not per token: your own other connections appear as joins and leaves.
+Presence events go to watchers on all server nodes of the channel. `presence_list()` also includes the connections on all of these nodes. Suppression is per connection, not per token: your own other connections appear as joins and leaves.
 
 ## Multiple connections
 

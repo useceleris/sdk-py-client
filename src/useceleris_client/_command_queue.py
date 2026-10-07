@@ -18,7 +18,11 @@ from useceleris_client._constants import (
     RATE_LIMIT_SUSPECT_WINDOW_MS,
 )
 from useceleris_client._encode import encode_client_command
-from useceleris_client._errors import CelerisConnectionError, ConfigurationError
+from useceleris_client._errors import (
+    CelerisConnectionError,
+    CelerisError,
+    ConfigurationError,
+)
 from useceleris_client._reconnect import compute_retry_delay_ms
 from useceleris_client._timers import Timer, Timers
 
@@ -65,10 +69,7 @@ class _SentPublish:
     sent_at: float
 
 
-def _settle(
-    publish: _QueuedPublish,
-    error: ConfigurationError | CelerisConnectionError | None = None,
-) -> None:
+def _settle(publish: _QueuedPublish, error: CelerisError | None = None) -> None:
     if publish.sent.done():
         return
 
@@ -85,11 +86,15 @@ class CommandQueue:
     The server never says which frame a rate limit dropped, so everything sent
     within the suspect window is resent: subscriptions as their current state,
     publishes once and with their original message id, so receivers drop any
-    copy that got through.
+    copy that got through. Waiting publishes outlive a dropped socket and go
+    out on the next one, after the restored subscriptions (QUEUE-01).
     """
 
-    def __init__(self, delegates: CommandQueueDelegates) -> None:
+    def __init__(
+        self, delegates: CommandQueueDelegates, *, publish_queue_size: int
+    ) -> None:
         self._delegates = delegates
+        self._publish_queue_size = publish_queue_size
         # Segment -> the sequence of its latest change, in first-change order.
         self._pending_interests: dict[InterestKind, dict[str, int]] = {
             "message": {},
@@ -123,11 +128,11 @@ class CommandQueue:
     async def publish(self, segment_id: str, data: bytes) -> None:
         """Returns once the publish is handed to the socket. Cancelling the
         caller withdraws a publish that has not gone out."""
-        if len(self._publishes) >= MAXIMUM_PENDING_COMMANDS:
+        if len(self._publishes) >= self._publish_queue_size:
             raise CelerisConnectionError(
                 "Backpressure",
-                f"{MAXIMUM_PENDING_COMMANDS} publishes are already waiting to be "
-                "sent. Retry once some have gone out.",
+                f"The publish queue is full (size {self._publish_queue_size}). "
+                "Retry once some publishes have gone out.",
             )
 
         self._sequence += 1
@@ -210,10 +215,32 @@ class CommandQueue:
 
         self._pause_timer = self._delegates.timers.call_later(delay, self._end_pause)
 
-    def reset(self, error: CelerisConnectionError) -> None:
-        """Nothing carries over to the next socket, which re-syncs every
-        subscription itself, and waiting publishes fail. The rate-limit streak
-        and the probe schedule stay: a reconnect does not refill a quota."""
+    def restore_interests(self, interests: list[tuple[InterestKind, str]]) -> None:
+        """Restored subscriptions go ahead of every waiting publish, even one
+        queued earlier to the same segment, so the connection is a member of its
+        segments again before the publishes join them (QUEUE-01). Drains once
+        all are marked, so no publish slips between them."""
+        for kind, segment_id in interests:
+            self._pending_interests[kind][segment_id] = 0
+
+        self._drain()
+
+    def reset(self, error: CelerisError) -> None:
+        """Waiting publishes fail with the error, and the socket state is
+        cleared."""
+        self.reset_connection_state()
+        publishes = self._publishes
+        self._publishes = []
+
+        for publish in publishes:
+            _settle(publish, error)
+
+    def reset_connection_state(self) -> None:
+        """Nothing tied to the lost socket carries over: the next socket
+        re-syncs every subscription itself, and nothing it was handed is
+        resent. Waiting publishes stay for the next socket. The rate-limit
+        streak and the probe schedule stay too: a reconnect does not refill a
+        quota."""
         for timer in (self._drain_timer, self._pause_timer, self._probe_timer):
             if timer is not None:
                 timer.cancel()
@@ -230,12 +257,6 @@ class CommandQueue:
         self._recent_publishes.clear()
         self._pending_commands = 0
         self._first_sent_since_rate_limit_at = None
-
-        publishes = self._publishes
-        self._publishes = []
-
-        for publish in publishes:
-            _settle(publish, error)
 
     def _end_pause(self) -> None:
         self._pause_timer = None
