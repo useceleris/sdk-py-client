@@ -26,6 +26,9 @@ def requires_peer() -> None:
         pytest.skip("CELERIS_WS_URL_PEER is not set.")
 
 
+# end function requires_peer
+
+
 async def test_fans_out_publishes_across_nodes() -> None:
     reference = unique_channel_reference("xnode")
     primary = await connected_channel(reference)
@@ -46,6 +49,9 @@ async def test_fans_out_publishes_across_nodes() -> None:
     await secondary.close()
 
 
+# end function test_fans_out_publishes_across_nodes
+
+
 async def test_reports_consistent_presence_across_nodes() -> None:
     reference = unique_channel_reference("xpres")
     primary = await connected_channel(reference)
@@ -61,6 +67,9 @@ async def test_reports_consistent_presence_across_nodes() -> None:
     assert from_primary.total >= 2
     await primary.close()
     await secondary.close()
+
+
+# end function test_reports_consistent_presence_across_nodes
 
 
 async def test_delivers_a_presence_join_from_another_node() -> None:
@@ -84,6 +93,9 @@ async def test_delivers_a_presence_join_from_another_node() -> None:
     assert (await joined).segment_id == "room"
     await joiner.close()
     await watcher.close()
+
+
+# end function test_delivers_a_presence_join_from_another_node
 
 
 async def test_delivers_a_presence_leave_from_another_node(
@@ -121,6 +133,9 @@ async def test_delivers_a_presence_leave_from_another_node(
     await left
 
 
+# end function test_delivers_a_presence_leave_from_another_node
+
+
 async def test_replays_history_published_on_another_node(
     opened: list[Channel],
 ) -> None:
@@ -151,6 +166,9 @@ async def test_replays_history_published_on_another_node(
     await asyncio.sleep(2)
 
     assert replayed == [b"h1", b"h2", b"h3"]
+
+
+# end function test_replays_history_published_on_another_node
 
 
 @pytest.mark.timeout(90)
@@ -187,3 +205,6 @@ async def test_keeps_one_origins_order_across_nodes(opened: list[Channel]) -> No
     await asyncio.sleep(2)
 
     assert received == bodies
+
+
+# end function test_keeps_one_origins_order_across_nodes

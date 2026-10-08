@@ -37,6 +37,8 @@ async def open_with(
     async def provide(request: CredentialRequest) -> Credentials:
         return sign_credentials(client_id(), signing_secret(), **(claims or {}))
 
+    # end function provide
+
     channel = create_client(
         base_url=base_url or websocket_url(),
         allow_insecure_loopback=True,
@@ -47,6 +49,9 @@ async def open_with(
     await channel.connect()
 
     return channel
+
+
+# end function open_with
 
 
 async def test_times_out_a_presence_query_at_a_1_ms_timeout_and_stays_connected(
@@ -64,6 +69,9 @@ async def test_times_out_a_presence_query_at_a_1_ms_timeout_and_stays_connected(
         "Presence query timed out after 1 ms.",
     )
     assert channel.state == "connected"
+
+
+# end function test_times_out_a_presence_query_at_a_1_ms_timeout_and_stays_connected
 
 
 async def test_delivers_replayed_ids_again_beyond_a_deduplication_window_of_1(
@@ -101,6 +109,9 @@ async def test_delivers_replayed_ids_again_beyond_a_deduplication_window_of_1(
     assert history == [b"one", b"two", b"one", b"two"]
 
 
+# end function test_delivers_replayed_ids_again_beyond_a_deduplication_window_of_1
+
+
 @pytest.mark.timeout(90)
 async def test_refuses_the_second_waiting_publish_with_a_publish_queue_of_1(
     proxy: DroppingProxy, opened: list[Channel]
@@ -124,6 +135,8 @@ async def test_refuses_the_second_waiting_publish_with_a_publish_queue_of_1(
 
         return "sent"
 
+    # end function outcome
+
     outcomes = [asyncio.ensure_future(outcome()) for _ in range(40)]
     await asyncio.sleep(2)
     proxy.stall_upstream(False)
@@ -134,3 +147,6 @@ async def test_refuses_the_second_waiting_publish_with_a_publish_queue_of_1(
         in results
     )
     assert results.count("sent") > 0
+
+
+# end function test_refuses_the_second_waiting_publish_with_a_publish_queue_of_1

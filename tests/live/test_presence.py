@@ -61,6 +61,9 @@ async def test_delivers_typed_join_and_leave_notifications_to_watchers() -> None
     await watcher.close()
 
 
+# end function test_delivers_typed_join_and_leave_notifications_to_watchers
+
+
 async def test_pages_presence_snapshots_with_raw_metadata() -> None:
     reference = unique_channel_reference("plist")
     first = await connected_channel(reference)
@@ -88,6 +91,9 @@ async def test_pages_presence_snapshots_with_raw_metadata() -> None:
     await second.close()
 
 
+# end function test_pages_presence_snapshots_with_raw_metadata
+
+
 async def test_rejects_a_write_only_tokens_presence_query_at_once() -> None:
     write_only = await connected_channel(
         unique_channel_reference("pdeny"),
@@ -112,6 +118,9 @@ async def test_rejects_a_write_only_tokens_presence_query_at_once() -> None:
     assert errors == []
     assert write_only.state == "connected"
     await write_only.close()
+
+
+# end function test_rejects_a_write_only_tokens_presence_query_at_once
 
 
 async def test_stops_notices_after_presence_cancellation_while_subscription_stays() -> (
@@ -144,11 +153,17 @@ async def test_stops_notices_after_presence_cancellation_while_subscription_stay
     await watcher.close()
 
 
+# end function test_stops_notices_after_presence_cancellation_while_subscription_stays
+
+
 def presence_events(channel: Channel, segment_id: str) -> list[PresenceEvent]:
     seen: list[PresenceEvent] = []
     channel.segment(segment_id).on_presence(seen.append)
 
     return seen
+
+
+# end function presence_events
 
 
 async def test_hides_a_connections_own_join_and_shows_it_to_a_sibling_of_the_same_token(
@@ -175,6 +190,9 @@ async def test_hides_a_connections_own_join_and_shows_it_to_a_sibling_of_the_sam
     assert first_join.token_reference == "alice"
     assert first_saw == []
     assert len(second_saw) == 1
+
+
+# end function test_hides_a_connections_own_join_and_shows_it_to_a_sibling_of_the_same_token
 
 
 async def test_sends_a_leave_when_a_member_unsubscribes_and_stays_connected(
@@ -207,6 +225,9 @@ async def test_sends_a_leave_when_a_member_unsubscribes_and_stays_connected(
 
     assert leave.connection_id == join.connection_id
     assert actor.state == "connected"
+
+
+# end function test_sends_a_leave_when_a_member_unsubscribes_and_stays_connected
 
 
 async def test_announces_default_segment_joins_on_connect_and_leaves_on_close(
@@ -245,6 +266,79 @@ async def test_announces_default_segment_joins_on_connect_and_leaves_on_close(
     )
     await late.close()
     await left
+
+
+# end function test_announces_default_segment_joins_on_connect_and_leaves_on_close
+
+
+@pytest.mark.timeout(60)
+async def test_lists_each_connection_of_one_token_reference_with_its_own_connection_id(
+    opened: list[Channel],
+) -> None:
+    reference = unique_channel_reference("presence-same-reference")
+    watcher = await connected_channel(reference, opened=opened, reference="watcher")
+    room = watcher.segment("room")
+    seen = presence_events(watcher, "room")
+    room.subscribe_presence()
+    await asyncio.sleep(1.5)
+
+    # One user with three tabs: three connections of one token reference.
+    tabs = [
+        await connected_channel(reference, opened=opened, reference="user_1")
+        for _ in range(3)
+    ]
+    all_joined = await started(
+        next_presence(
+            room,
+            lambda event: len([entry for entry in seen if entry.joined]) >= 3,
+            "three joins",
+            20,
+        )
+    )
+
+    for tab in tabs:
+        tab.segment("room").subscribe()
+
+    await all_joined
+    joins = [event for event in seen if event.joined]
+    join_ids = sorted(event.connection_id for event in joins)
+
+    assert [event.token_reference for event in joins] == ["user_1"] * 3
+    assert len(set(join_ids)) == 3
+
+    # The largest page size, 100, lists all three.
+    page = await room.presence_list(page=1, per_page=100)
+
+    assert page.total == 3
+    assert [connection.token_reference for connection in page.connections] == [
+        "user_1"
+    ] * 3
+    assert sorted(connection.connection_id for connection in page.connections) == (
+        join_ids
+    )
+
+    # Closing one tab removes only that connection.
+    left = await started(
+        next_presence(room, lambda event: not event.joined, "the leave of one tab")
+    )
+    await tabs[0].close()
+    leave = await left
+
+    assert leave.token_reference == "user_1"
+    assert leave.connection_id in join_ids
+
+    await asyncio.sleep(1.5)
+    after = await room.presence_list(page=1, per_page=100)
+
+    assert after.total == 2
+    assert sorted(connection.connection_id for connection in after.connections) == [
+        connection_id
+        for connection_id in join_ids
+        if connection_id != leave.connection_id
+    ]
+
+
+# end function test_lists_each_connection_of_one_token_reference_with_its_own_connection_id
 
 
 async def test_pages_through_several_full_pages_and_past_the_end(
@@ -290,3 +384,6 @@ async def test_pages_through_several_full_pages_and_past_the_end(
         "m2",
         "m3",
     ]
+
+
+# end function test_pages_through_several_full_pages_and_past_the_end

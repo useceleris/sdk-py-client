@@ -24,3 +24,6 @@ def test_runs_the_quickstart() -> None:
     assert re.search(r"example: ok delivered=[1-9]\d* present=\d+", result.stdout), (
         result.stdout
     )
+
+
+# end function test_runs_the_quickstart

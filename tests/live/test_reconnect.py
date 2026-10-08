@@ -37,8 +37,14 @@ def received(channel: Channel, segment_id: str) -> list[tuple[bytes, str]]:
     return deliveries
 
 
+# end function received
+
+
 def bodies(deliveries: list[tuple[bytes, str]]) -> list[bytes]:
     return [payload for payload, _ in deliveries]
+
+
+# end function bodies
 
 
 async def arrival(
@@ -57,6 +63,9 @@ async def arrival(
     await asyncio.sleep(0)
 
     return delivered
+
+
+# end function arrival
 
 
 @dataclass
@@ -78,6 +87,8 @@ class Reconnecting:
         await asyncio.sleep(0.5)
         assert self.receiver.state == "reconnecting"
 
+    # end method start_outage
+
     async def end_outage(self) -> None:
         if self.recoveries:
             self.dropping.refusing = False
@@ -94,6 +105,11 @@ class Reconnecting:
         await asyncio.sleep(0)
         self.dropping.refusing = False
         await recovered
+
+    # end method end_outage
+
+
+# end class Reconnecting
 
 
 async def set_up(
@@ -117,6 +133,8 @@ async def set_up(
 
         return sign_credentials(client_id(), signing_secret())
 
+    # end function provide
+
     receiver = create_client(
         base_url=proxy.url, allow_insecure_loopback=True, credential_provider=provide
     ).channel(reference)
@@ -127,6 +145,9 @@ async def set_up(
     opened.append(publisher)
 
     return Reconnecting(proxy, receiver, publisher, requests, recoveries)
+
+
+# end function set_up
 
 
 # SUB-01, REC-02: an outage recovers with fresh credentials, a replay of what
@@ -173,6 +194,9 @@ async def test_recovers_after_an_outage_with_replay_and_restored_subscriptions(
     # Replay sent "before" again; the dedup window dropped it.
     assert bodies(chat) == [b"before", b"during", b"after"]
     assert len({message_id for _, message_id in chat}) == 3
+
+
+# end function test_recovers_after_an_outage_with_replay_and_restored_subscriptions
 
 
 @pytest.mark.timeout(120)
@@ -231,6 +255,9 @@ async def test_recovers_every_missed_message_on_several_segments_in_order_and_on
     )
 
 
+# end function test_recovers_every_missed_message_on_several_segments_in_order_and_one_time
+
+
 @pytest.mark.timeout(120)
 async def test_loses_missed_messages_without_replay_but_restores_the_subscription(
     proxy: DroppingProxy, opened: list[Channel]
@@ -259,6 +286,9 @@ async def test_loses_missed_messages_without_replay_but_restores_the_subscriptio
     # The recovery event declares the gap that this test makes.
     assert setup.recoveries[0].possible_gaps
     assert bodies(chat) == [b"before", b"after"]
+
+
+# end function test_loses_missed_messages_without_replay_but_restores_the_subscription
 
 
 @pytest.mark.timeout(120)
@@ -302,6 +332,9 @@ async def test_recovers_every_missed_message_after_a_longer_outage_with_failed_a
     assert bodies(chat) == [b"m1", b"m2", b"m3"]
 
 
+# end function test_recovers_every_missed_message_after_a_longer_outage_with_failed_attempts
+
+
 @pytest.mark.timeout(120)
 async def test_does_not_rejoin_a_segment_that_the_connection_joined_only_by_publishing(
     proxy: DroppingProxy, opened: list[Channel]
@@ -327,6 +360,9 @@ async def test_does_not_rejoin_a_segment_that_the_connection_joined_only_by_publ
     await asyncio.sleep(2.5)
 
     assert bodies(team) == [b"before"]
+
+
+# end function test_does_not_rejoin_a_segment_that_the_connection_joined_only_by_publishing
 
 
 @pytest.mark.timeout(120)
@@ -383,3 +419,112 @@ async def test_announces_the_new_connection_and_restores_its_presence_subscripti
     )
     actor.segment("room").subscribe()
     await actor_join
+
+
+# end function test_announces_the_new_connection_and_restores_its_presence_subscription
+
+
+# QUEUE-01: publishes made while the publisher reconnects wait in its queue
+# and go out on the new connection, in call order.
+@pytest.mark.timeout(120)
+async def test_delivers_publishes_made_during_an_outage_in_call_order(
+    proxy: DroppingProxy, opened: list[Channel]
+) -> None:
+    setup = await set_up(proxy, opened, "reconnect-queued", False)
+    # The roles swap here: the channel behind the proxy publishes, and the
+    # one that connects directly receives.
+    publisher, receiver = setup.receiver, setup.publisher
+    chat = received(receiver, "chat")
+    receiver.segment("chat").subscribe()
+    await publisher.connect()
+    await asyncio.sleep(1.5)
+
+    await setup.start_outage()
+    published = [
+        asyncio.ensure_future(publisher.segment("chat").publish(body))
+        for body in (b"q1", b"q2", b"q3")
+    ]
+    await asyncio.sleep(0.5)
+    assert not any(pending.done() for pending in published)
+
+    last = await arrival(receiver, "chat", b"q3")
+    await setup.end_outage()
+    await asyncio.gather(*published)
+    await last
+    await asyncio.sleep(1.5)
+
+    assert bodies(chat) == [b"q1", b"q2", b"q3"]
+
+
+# end function test_delivers_publishes_made_during_an_outage_in_call_order
+
+
+async def member_ids(observer: Channel, segment_id: str) -> set[str]:
+    page = await observer.segment(segment_id).presence_list(page=1, per_page=100)
+
+    return {connection.connection_id for connection in page.connections}
+
+
+# end function member_ids
+
+
+@pytest.mark.timeout(120)
+async def test_keeps_the_same_segments_after_a_reconnect(
+    proxy: DroppingProxy, opened: list[Channel]
+) -> None:
+    setup = await set_up(proxy, opened, "reconnect-same-segments")
+    receiver, observer = setup.receiver, setup.publisher
+    alpha = received(receiver, "alpha")
+    beta = received(receiver, "beta")
+    gamma = received(receiver, "gamma")
+    receiver.segment("alpha").subscribe()
+    receiver.segment("beta").subscribe()
+    receiver.segment("alpha").subscribe_presence()
+    gamma_subscription = receiver.segment("gamma").subscribe()
+    await receiver.connect()
+    await asyncio.sleep(1.5)
+    gamma_subscription.cancel()
+    await asyncio.sleep(1.5)
+
+    (old_id,) = await member_ids(observer, "alpha")
+
+    await setup.start_outage()
+    await setup.end_outage()
+    await asyncio.sleep(1.5)
+
+    # (a) and (b): the new connection is a member of alpha and beta only.
+    (new_id,) = await member_ids(observer, "alpha")
+    assert new_id != old_id
+    assert await member_ids(observer, "beta") == {new_id}
+    assert new_id not in await member_ids(observer, "gamma")
+
+    # (c): messages reach alpha and beta; the control proves gamma's did not.
+    for segment_id in ("alpha", "beta", "gamma"):
+        await observer.segment(segment_id).publish(segment_id.encode())
+
+    control = await arrival(receiver, "default", b"control")
+    await observer.segment("default").publish(b"control")
+    await control
+    await asyncio.sleep(1)
+
+    assert bodies(alpha) == [b"alpha"]
+    assert bodies(beta) == [b"beta"]
+    assert bodies(gamma) == []
+
+    # (d): the restored presence subscription on alpha sees a new actor join.
+    actor_join = await started(
+        next_presence(
+            receiver.segment("alpha"),
+            lambda event: event.joined and event.token_reference == "actor",
+            "the actor's join at the restored watcher",
+            20,
+        )
+    )
+    actor = await connected_channel(
+        setup.requests[0].channel_reference, opened=opened, reference="actor"
+    )
+    actor.segment("alpha").subscribe()
+    await actor_join
+
+
+# end function test_keeps_the_same_segments_after_a_reconnect

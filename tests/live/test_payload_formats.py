@@ -59,6 +59,9 @@ def read_varint(data: bytes, offset: int) -> tuple[int, int]:
         shift += 7
 
 
+# end function read_varint
+
+
 @pytest.mark.parametrize(
     ("label", "vector"),
     [
@@ -85,6 +88,9 @@ async def test_round_trips_a_payload_byte_identically(
     assert GENERATED_MESSAGE_ID.fullmatch(message.metadata.message_id)
     await publisher.close()
     await receiver.close()
+
+
+# end function test_round_trips_a_payload_byte_identically
 
 
 async def test_delivers_payloads_that_decode_to_their_intended_values() -> None:
@@ -135,6 +141,9 @@ async def test_delivers_payloads_that_decode_to_their_intended_values() -> None:
     await receiver.close()
 
 
+# end function test_delivers_payloads_that_decode_to_their_intended_values
+
+
 async def test_carries_helper_and_codec_payloads_through_the_live_server() -> None:
     reference = unique_channel_reference("fmt-helpers")
     publisher = await connected_channel(reference)
@@ -173,3 +182,6 @@ async def test_carries_helper_and_codec_payloads_through_the_live_server() -> No
     assert received[2] == PROTOBUF_VECTOR
     await publisher.close()
     await receiver.close()
+
+
+# end function test_carries_helper_and_codec_payloads_through_the_live_server

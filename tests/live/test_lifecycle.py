@@ -41,6 +41,9 @@ class Proxied:
     errors: list[ChannelError]
 
 
+# end class Proxied
+
+
 def proxied_channel(
     proxy: DroppingProxy, opened: list[Channel], label: str, **options: Any
 ) -> Proxied:
@@ -50,6 +53,8 @@ def proxied_channel(
         requests.append(request)
 
         return sign_credentials(client_id(), signing_secret())
+
+    # end function provide
 
     channel = create_client(
         base_url=proxy.url,
@@ -66,6 +71,9 @@ def proxied_channel(
     return Proxied(channel, requests, states, errors)
 
 
+# end function proxied_channel
+
+
 async def until_state(channel: Channel, state: ChannelState, timeout_s: float) -> None:
     if channel.state == state:
         return
@@ -76,6 +84,9 @@ async def until_state(channel: Channel, state: ChannelState, timeout_s: float) -
         f"the {state} state",
         timeout_s,
     )
+
+
+# end function until_state
 
 
 async def test_fails_a_connect_at_its_connect_timeout_when_the_server_never_answers(
@@ -104,11 +115,16 @@ async def test_fails_a_connect_at_its_connect_timeout_when_the_server_never_answ
     assert setup.errors == []
 
 
+# end function test_fails_a_connect_at_its_connect_timeout_when_the_server_never_answers
+
+
 async def test_times_out_at_a_1_ms_connect_timeout_against_the_real_server(
     opened: list[Channel],
 ) -> None:
     async def provide(request: CredentialRequest) -> Credentials:
         return sign_credentials(client_id(), signing_secret())
+
+    # end function provide
 
     channel = create_client(
         base_url=websocket_url(),
@@ -123,6 +139,9 @@ async def test_times_out_at_a_1_ms_connect_timeout_against_the_real_server(
 
     assert caught.value.code == "Timeout"
     assert channel.state == "failed"
+
+
+# end function test_times_out_at_a_1_ms_connect_timeout_against_the_real_server
 
 
 # Cancellation is asyncio's own (LANG-02): cancelling the task that awaits
@@ -141,6 +160,9 @@ async def test_cancels_a_connect_from_its_task(
         await pending
 
     assert setup.channel.state == "failed"
+
+
+# end function test_cancels_a_connect_from_its_task
 
 
 async def test_closes_a_channel_that_is_still_connecting(
@@ -165,6 +187,9 @@ async def test_closes_a_channel_that_is_still_connecting(
     assert caught.value.code == "NotConnected"
 
 
+# end function test_closes_a_channel_that_is_still_connecting
+
+
 async def test_closes_a_channel_that_is_reconnecting_and_stops_its_retries(
     proxy: DroppingProxy, opened: list[Channel]
 ) -> None:
@@ -184,22 +209,32 @@ async def test_closes_a_channel_that_is_reconnecting_and_stops_its_retries(
     assert len(setup.requests) == requests_at_close
 
 
-async def test_rejects_a_publish_while_reconnecting_without_a_queue(
+# end function test_closes_a_channel_that_is_reconnecting_and_stops_its_retries
+
+
+# QUEUE-01: a publish while reconnecting waits (test_reconnect covers it);
+# after failed no recovery is in progress, so it is refused.
+async def test_refuses_a_publish_after_failed_with_not_connected(
     proxy: DroppingProxy, opened: list[Channel]
 ) -> None:
-    setup = proxied_channel(proxy, opened, "lifecycle-publish-reconnecting")
-    await setup.channel.connect()
+    setup = proxied_channel(proxy, opened, "lifecycle-publish-failed")
     proxy.refusing = True
-    proxy.drop_all()
-    await until_state(setup.channel, "reconnecting", 5)
+
+    with pytest.raises(CelerisConnectionError):
+        await setup.channel.connect()
+
+    assert setup.channel.state == "failed"
 
     with pytest.raises(CelerisConnectionError) as caught:
         await setup.channel.segment("chat").publish(b"x")
 
     assert (caught.value.code, caught.value.message) == (
         "NotConnected",
-        "Channel is not connected; it is reconnecting.",
+        "Channel is not connected; it is failed.",
     )
+
+
+# end function test_refuses_a_publish_after_failed_with_not_connected
 
 
 async def test_restarts_from_failed_with_a_connect_and_sends_held_subscriptions(
@@ -239,6 +274,9 @@ async def test_restarts_from_failed_with_a_connect_and_sends_held_subscriptions(
     assert chat == [b"after-restart"]
 
 
+# end function test_restarts_from_failed_with_a_connect_and_sends_held_subscriptions
+
+
 @pytest.mark.timeout(240)
 async def test_fails_after_ten_failed_reconnect_attempts_and_reports_it(
     proxy: DroppingProxy, opened: list[Channel]
@@ -259,6 +297,9 @@ async def test_fails_after_ten_failed_reconnect_attempts_and_reports_it(
     assert isinstance(setup.errors[0], CelerisConnectionError)
     assert setup.errors[0].code == "Transport"
     assert setup.states[-2:] == ["reconnecting", "failed"]
+
+
+# end function test_fails_after_ten_failed_reconnect_attempts_and_reports_it
 
 
 @pytest.mark.timeout(90)
@@ -283,6 +324,9 @@ async def test_fails_after_the_configured_maximum_of_2_reconnect_attempts(
     assert isinstance(setup.errors[0], CelerisConnectionError)
     assert setup.errors[0].code == "Transport"
     assert setup.states[-2:] == ["reconnecting", "failed"]
+
+
+# end function test_fails_after_the_configured_maximum_of_2_reconnect_attempts
 
 
 @pytest.mark.timeout(150)
@@ -324,6 +368,9 @@ async def test_resets_the_retry_budget_after_sixty_seconds_connected(
     assert recoveries[-1].retry_index == 0
 
 
+# end function test_resets_the_retry_budget_after_sixty_seconds_connected
+
+
 @pytest.mark.timeout(150)
 async def test_keeps_an_idle_connection_open_past_the_servers_60_second_heartbeat(
     opened: list[Channel],
@@ -350,3 +397,6 @@ async def test_keeps_an_idle_connection_open_past_the_servers_60_second_heartbea
 
     assert states == []
     assert receiver.state == "connected"
+
+
+# end function test_keeps_an_idle_connection_open_past_the_servers_60_second_heartbeat

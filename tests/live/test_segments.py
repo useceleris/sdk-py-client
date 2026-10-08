@@ -27,6 +27,9 @@ def received(channel: Channel, segment_id: str) -> list[bytes]:
     return payloads
 
 
+# end function received
+
+
 async def publish_and_await(
     publisher: Channel, receiver: Channel, segment_id: str, body: bytes
 ) -> None:
@@ -44,12 +47,18 @@ async def publish_and_await(
     await delivered
 
 
+# end function publish_and_await
+
+
 async def confirm_quiet(publisher: Channel, receiver: Channel) -> None:
     """A negative check needs proof the connection was live: a control message
     on the default segment, which always delivers, then time for a stray
     delivery to land."""
     await publish_and_await(publisher, receiver, "default", b"control")
     await asyncio.sleep(2.5)
+
+
+# end function confirm_quiet
 
 
 @pytest.fixture
@@ -60,6 +69,9 @@ async def opened() -> AsyncIterator[list[Channel]]:
 
     for channel in channels:
         await channel.close()
+
+
+# end function opened
 
 
 async def pair(
@@ -74,6 +86,9 @@ async def pair(
     return publisher, receiver
 
 
+# end function pair
+
+
 class TestReceiving:
     async def test_delivers_nothing_to_a_listener_without_a_subscription(
         self, opened: list[Channel]
@@ -85,6 +100,8 @@ class TestReceiving:
         await confirm_quiet(publisher, receiver)
 
         assert chat == []
+
+    # end method test_delivers_nothing_to_a_listener_without_a_subscription
 
     async def test_delivers_after_a_subscription_made_before_connecting(
         self, opened: list[Channel]
@@ -103,6 +120,8 @@ class TestReceiving:
 
         assert chat == [b"hello"]
 
+    # end method test_delivers_after_a_subscription_made_before_connecting
+
     async def test_delivers_after_a_subscription_made_once_connected(
         self, opened: list[Channel]
     ) -> None:
@@ -115,6 +134,8 @@ class TestReceiving:
 
         assert chat == [b"hello"]
 
+    # end method test_delivers_after_a_subscription_made_once_connected
+
     async def test_delivers_to_a_listener_attached_after_subscribing(
         self, opened: list[Channel]
     ) -> None:
@@ -126,6 +147,11 @@ class TestReceiving:
         await publish_and_await(publisher, receiver, "chat", b"hello")
 
         assert chat == [b"hello"]
+
+    # end method test_delivers_to_a_listener_attached_after_subscribing
+
+
+# end class TestReceiving
 
 
 class TestLeaving:
@@ -150,6 +176,8 @@ class TestLeaving:
 
         assert chat == [b"one", b"three"]
 
+    # end method test_stops_on_cancel_and_resumes_on_a_new_subscription
+
     async def test_leaves_only_when_the_last_handle_cancels(
         self, opened: list[Channel]
     ) -> None:
@@ -169,6 +197,8 @@ class TestLeaving:
         await confirm_quiet(publisher, receiver)
 
         assert chat == [b"one"]
+
+    # end method test_leaves_only_when_the_last_handle_cancels
 
     async def test_routes_each_segments_messages_to_its_own_listeners_only(
         self, opened: list[Channel]
@@ -194,6 +224,8 @@ class TestLeaving:
         assert alpha == [b"a", b"still"]
         assert beta == [b"b"]
 
+    # end method test_routes_each_segments_messages_to_its_own_listeners_only
+
     async def test_keeps_other_listeners_and_the_subscription_when_one_stops(
         self, opened: list[Channel]
     ) -> None:
@@ -213,6 +245,11 @@ class TestLeaving:
         assert stopped == [b"one"]
         assert kept == [b"one", b"two"]
 
+    # end method test_keeps_other_listeners_and_the_subscription_when_one_stops
+
+
+# end class TestLeaving
+
 
 # Membership the server grants without a message subscription (SEG-01).
 class TestJoinsTheServerMakes:
@@ -227,6 +264,8 @@ class TestJoinsTheServerMakes:
         await publish_and_await(publisher, receiver, "chat", b"after")
 
         assert chat == [b"after"]
+
+    # end method test_delivers_to_a_segment_joined_by_publishing
 
     # Watching presence is not membership: it neither joins nor holds.
     async def test_never_joins_or_holds_a_segment_for_a_presence_subscription(
@@ -251,6 +290,8 @@ class TestJoinsTheServerMakes:
 
         assert chat == [b"one"]
 
+    # end method test_never_joins_or_holds_a_segment_for_a_presence_subscription
+
     async def test_leaves_a_segment_joined_by_publishing_on_the_last_cancel(
         self, opened: list[Channel]
     ) -> None:
@@ -266,6 +307,11 @@ class TestJoinsTheServerMakes:
         await confirm_quiet(publisher, receiver)
 
         assert chat == []
+
+    # end method test_leaves_a_segment_joined_by_publishing_on_the_last_cancel
+
+
+# end class TestJoinsTheServerMakes
 
 
 # Publishing joins the segment, but read access is checked at the join:
@@ -287,6 +333,8 @@ class TestTokenPermissions:
 
         assert chat == [b"after"]
 
+    # end method test_receives_after_publishing_with_a_read_write_token
+
     async def test_receives_nothing_after_publishing_with_a_write_only_token(
         self, opened: list[Channel]
     ) -> None:
@@ -305,6 +353,8 @@ class TestTokenPermissions:
         await asyncio.sleep(2.5)
 
         assert chat == []
+
+    # end method test_receives_nothing_after_publishing_with_a_write_only_token
 
     async def test_refuses_a_read_only_tokens_publish_and_delivers_once_subscribed(
         self, opened: list[Channel]
@@ -339,6 +389,11 @@ class TestTokenPermissions:
 
         assert chat == [b"heard"]
 
+    # end method test_refuses_a_read_only_tokens_publish_and_delivers_once_subscribed
+
+
+# end class TestTokenPermissions
+
 
 # One channel is one WebSocket; its segments share it (SEG-01).
 class TestConnections:
@@ -361,6 +416,8 @@ class TestConnections:
 
             return [connection.connection_id for connection in page.connections]
 
+        # end function connections_in
+
         alpha = await connections_in("alpha")
         assert len(alpha) == 1
         assert await connections_in("beta") == alpha
@@ -373,6 +430,11 @@ class TestConnections:
         both = await connections_in("alpha")
         assert len(both) == 2
         assert len(set(both)) == 2
+
+    # end method test_multiplexes_a_channels_segments_over_one_connection
+
+
+# end class TestConnections
 
 
 class TestChannelWideListener:
@@ -398,6 +460,8 @@ class TestChannelWideListener:
         assert kept == [b"one", b"two"]
         assert chat == [b"one", b"two"]
 
+    # end method test_removes_one_channel_listener_and_leaves_every_other_listener
+
     async def test_catches_deliveries_no_segment_listener_asked_for(
         self, opened: list[Channel]
     ) -> None:
@@ -407,12 +471,16 @@ class TestChannelWideListener:
         def record(payload: bytes, metadata: MessageMetadata) -> None:
             seen.append(f"{metadata.segment_id}:{payload.decode()}")
 
+        # end function record
+
         receiver.events().on_message(record)
         await receiver.segment("joined").publish(b"joining")
         await asyncio.sleep(1.5)
 
         def register(deliver: Callable[[list[str]], None]) -> Callable[[], None]:
             return receiver.events().on_message(lambda payload, metadata: deliver(seen))
+
+        # end function register
 
         both = asyncio.ensure_future(
             wait_for(
@@ -427,3 +495,8 @@ class TestChannelWideListener:
         await both
 
         assert sorted(seen) == ["default:y", "joined:x"]
+
+    # end method test_catches_deliveries_no_segment_listener_asked_for
+
+
+# end class TestChannelWideListener

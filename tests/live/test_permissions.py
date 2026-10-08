@@ -35,6 +35,9 @@ def received(channel: Channel, segment_id: str) -> list[bytes]:
     return bodies
 
 
+# end function received
+
+
 async def denial(
     channel: Channel, sub_type: str, segment_id: str
 ) -> asyncio.Future[ChannelError]:
@@ -49,9 +52,14 @@ async def denial(
             and error.resource == segment_id
         )
 
+    # end function matches
+
     return await started(
         next_error(channel, matches, f"a {sub_type} denial for {segment_id}")
     )
+
+
+# end function denial
 
 
 async def test_lets_a_read_only_segment_receive_and_refuses_its_publish(
@@ -82,6 +90,9 @@ async def test_lets_a_read_only_segment_receive_and_refuses_its_publish(
     assert limited.state == "connected"
 
 
+# end function test_lets_a_read_only_segment_receive_and_refuses_its_publish
+
+
 async def test_lets_a_write_only_segment_publish_and_receive_nothing(
     opened: list[Channel],
 ) -> None:
@@ -108,6 +119,9 @@ async def test_lets_a_write_only_segment_publish_and_receive_nothing(
     assert writeonly == []
 
 
+# end function test_lets_a_write_only_segment_publish_and_receive_nothing
+
+
 async def test_refuses_presence_on_a_segment_without_read_access(
     opened: list[Channel],
 ) -> None:
@@ -130,6 +144,9 @@ async def test_refuses_presence_on_a_segment_without_read_access(
     assert page.connections == ()
 
 
+# end function test_refuses_presence_on_a_segment_without_read_access
+
+
 async def test_refuses_every_command_on_a_segment_the_token_does_not_list(
     opened: list[Channel],
 ) -> None:
@@ -147,6 +164,9 @@ async def test_refuses_every_command_on_a_segment_the_token_does_not_list(
     await refused_watch
 
     assert limited.state == "connected"
+
+
+# end function test_refuses_every_command_on_a_segment_the_token_does_not_list
 
 
 async def test_gives_an_unlisted_default_segment_no_read_and_no_write_access(
@@ -177,6 +197,9 @@ async def test_gives_an_unlisted_default_segment_no_read_and_no_write_access(
 
     assert lobby == []
     assert readonly == [b"control"]
+
+
+# end function test_gives_an_unlisted_default_segment_no_read_and_no_write_access
 
 
 async def test_shows_the_reference_claim_in_message_metadata_presence_events_and_lists(
@@ -215,3 +238,6 @@ async def test_shows_the_reference_claim_in_message_metadata_presence_events_and
         "alice",
         "watcher",
     ]
+
+
+# end function test_shows_the_reference_claim_in_message_metadata_presence_events_and_lists

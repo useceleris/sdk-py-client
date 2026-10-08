@@ -5,21 +5,28 @@ import pytest
 
 from tests.live.helpers import (
     GENERATED_MESSAGE_ID,
+    client_id,
     collect,
     connected_channel,
     next_error,
     next_message,
     now_ms,
+    sign_credentials,
+    signing_secret,
     started,
     unique_channel_reference,
+    websocket_url,
 )
 from useceleris_client import (
     CelerisConnectionError,
     Channel,
     ChannelError,
     ConfigurationError,
+    CredentialRequest,
+    Credentials,
     MessageMetadata,
     ServerError,
+    create_client,
 )
 
 pytestmark = pytest.mark.live
@@ -27,6 +34,9 @@ pytestmark = pytest.mark.live
 
 def patterned(length: int) -> bytes:
     return bytes(index % 251 for index in range(length))
+
+
+# end function patterned
 
 
 async def test_delivers_binary_payloads_with_their_ids_and_per_connection_echo() -> (
@@ -59,6 +69,9 @@ async def test_delivers_binary_payloads_with_their_ids_and_per_connection_echo()
     await receiver.close()
 
 
+# end function test_delivers_binary_payloads_with_their_ids_and_per_connection_echo
+
+
 async def test_echoes_to_the_publisher_when_the_token_allows_echo() -> None:
     channel = await connected_channel(unique_channel_reference("echo"), allow_echo=True)
     saw = collect(channel, "chat")
@@ -73,6 +86,9 @@ async def test_echoes_to_the_publisher_when_the_token_allows_echo() -> None:
 
     assert len(saw) >= 1
     await channel.close()
+
+
+# end function test_echoes_to_the_publisher_when_the_token_allows_echo
 
 
 async def test_delivers_on_the_default_segment_without_subscribing() -> None:
@@ -97,6 +113,9 @@ async def test_delivers_on_the_default_segment_without_subscribing() -> None:
     await receiver.close()
 
 
+# end function test_delivers_on_the_default_segment_without_subscribing
+
+
 async def test_round_trips_a_large_binary_payload() -> None:
     reference = unique_channel_reference("large")
     publisher = await connected_channel(reference)
@@ -116,6 +135,9 @@ async def test_round_trips_a_large_binary_payload() -> None:
     assert message.payload == payload
     await publisher.close()
     await receiver.close()
+
+
+# end function test_round_trips_a_large_binary_payload
 
 
 # Needs the qualification app on a plan with message_size_limit_in_kb of at
@@ -143,6 +165,9 @@ async def test_round_trips_a_full_1024_kib_payload() -> None:
     await receiver.close()
 
 
+# end function test_round_trips_a_full_1024_kib_payload
+
+
 async def test_reports_a_publish_over_the_plan_cap_as_message_size_limit() -> None:
     channel = await connected_channel(unique_channel_reference("oversize"))
 
@@ -162,6 +187,9 @@ async def test_reports_a_publish_over_the_plan_cap_as_message_size_limit() -> No
     assert "Message size limit exceeded" in str(rejection)
     assert channel.state == "connected"
     await channel.close()
+
+
+# end function test_reports_a_publish_over_the_plan_cap_as_message_size_limit
 
 
 async def test_reports_a_read_only_tokens_publish_as_permission_denied() -> None:
@@ -187,6 +215,9 @@ async def test_reports_a_read_only_tokens_publish_as_permission_denied() -> None
     await read_only.close()
 
 
+# end function test_reports_a_read_only_tokens_publish_as_permission_denied
+
+
 async def test_keeps_a_write_only_token_publishing_while_receiving_nothing() -> None:
     reference = unique_channel_reference("writeonly")
     write_only = await connected_channel(
@@ -210,6 +241,9 @@ async def test_keeps_a_write_only_token_publishing_while_receiving_nothing() -> 
     await reader.close()
 
 
+# end function test_keeps_a_write_only_token_publishing_while_receiving_nothing
+
+
 @pytest.mark.timeout(240)
 async def test_recovers_subscriptions_the_server_drops_under_its_rate_limit() -> None:
     reference = unique_channel_reference("limit")
@@ -224,6 +258,8 @@ async def test_recovers_subscriptions_the_server_drops_under_its_rate_limit() ->
         if isinstance(error, ServerError) and error.type == "RateLimitError":
             rate_limited = True
 
+    # end function watch
+
     subscriber.events().on_error(watch)
 
     # The limiter tolerates bursts, so subscriptions go out in growing batches
@@ -236,6 +272,8 @@ async def test_recovers_subscriptions_the_server_drops_under_its_rate_limit() ->
         subscriber.segment(segment_id).on_message(
             lambda payload, metadata: delivered.add(segment_id)
         )
+
+    # end function deliver_to
 
     while not rate_limited and len(segment_ids) < 2_000:
         for _ in range(250):
@@ -277,6 +315,100 @@ async def test_recovers_subscriptions_the_server_drops_under_its_rate_limit() ->
     await subscriber.close()
 
 
+# end function test_recovers_subscriptions_the_server_drops_under_its_rate_limit
+
+
+async def provide_publisher_credentials(request: CredentialRequest) -> Credentials:
+    return sign_credentials(client_id(), signing_secret(), reference="limit-publisher")
+
+
+# end function provide_publisher_credentials
+
+
+# L2 (RESEND-01): publishes resent after a rate limit carry their original
+# ids, so the receiver's dedup window drops any copy that got through.
+@pytest.mark.timeout(120)
+async def test_delivers_no_duplicate_under_a_publish_rate_limit(
+    opened: list[Channel],
+) -> None:
+    reference = unique_channel_reference("limit-publish")
+    # Separate token references keep separate per-connection limits.
+    receiver = await connected_channel(
+        reference, opened=opened, reference="limit-receiver"
+    )
+    # A queue large enough for the whole burst, so that the publishes reach
+    # the server instead of being refused with Backpressure in the client.
+    publisher = create_client(
+        base_url=websocket_url(),
+        allow_insecure_loopback=True,
+        publish_queue_size=10_000,
+        credential_provider=provide_publisher_credentials,
+    ).channel(reference)
+    opened.append(publisher)
+    await publisher.connect()
+    delivered = collect(receiver, "burst")
+    await asyncio.sleep(1.5)
+    rate_limited = False
+
+    def watch(error: ChannelError) -> None:
+        nonlocal rate_limited
+
+        if isinstance(error, ServerError) and error.type == "RateLimitError":
+            rate_limited = True
+
+    # end function watch
+
+    publisher.events().on_error(watch)
+
+    # Bursts that double in size until one trips the limit. The ceiling on the
+    # total keeps the test finite. A publish the full queue refuses with
+    # Backpressure never went out, which is fine.
+    published: set[bytes] = set()
+    burst_size = 100
+
+    while not rate_limited and len(published) < 5_000:
+        burst: list[asyncio.Future[None]] = []
+
+        for _ in range(burst_size):
+            body = f"burst-{len(published)}".encode()
+            published.add(body)
+            burst.append(
+                asyncio.ensure_future(publisher.segment("burst").publish(body))
+            )
+
+        await asyncio.gather(*burst, return_exceptions=True)
+        burst_size *= 2
+        await asyncio.sleep(0.2)
+
+    assert rate_limited, "the publish burst must trip the limit"
+
+    await asyncio.sleep(3)
+    marker = await started(
+        next_message(
+            receiver.segment("burst"),
+            lambda message: message.payload == b"marker",
+            "the marker",
+            30,
+        )
+    )
+    published.add(b"marker")
+    await publisher.segment("burst").publish(b"marker")
+    await marker
+    await asyncio.sleep(1.5)
+
+    message_ids = [message.metadata.message_id for message in delivered]
+    bodies = [message.payload for message in delivered]
+
+    assert len(set(message_ids)) == len(message_ids)
+    assert [body for body in bodies if body not in published] == []
+    assert b"marker" in bodies
+    assert receiver.state == "connected"
+    assert publisher.state == "connected"
+
+
+# end function test_delivers_no_duplicate_under_a_publish_rate_limit
+
+
 async def test_delivers_a_custom_message_id_unchanged_and_drops_a_repeat_of_it(
     opened: list[Channel],
 ) -> None:
@@ -303,6 +435,9 @@ async def test_delivers_a_custom_message_id_unchanged_and_drops_a_repeat_of_it(
     assert received[0].metadata.message_id == message_id
 
 
+# end function test_delivers_a_custom_message_id_unchanged_and_drops_a_repeat_of_it
+
+
 async def test_round_trips_an_empty_payload(opened: list[Channel]) -> None:
     reference = unique_channel_reference("empty")
     publisher = await connected_channel(reference, opened=opened)
@@ -322,6 +457,9 @@ async def test_round_trips_an_empty_payload(opened: list[Channel]) -> None:
 
     assert message.payload == b""
     assert GENERATED_MESSAGE_ID.fullmatch(message.metadata.message_id)
+
+
+# end function test_round_trips_an_empty_payload
 
 
 async def test_refuses_a_payload_one_byte_over_the_1024_kib_plan_cap(
@@ -348,6 +486,9 @@ async def test_refuses_a_payload_one_byte_over_the_1024_kib_plan_cap(
     assert channel.state == "connected"
 
 
+# end function test_refuses_a_payload_one_byte_over_the_1024_kib_plan_cap
+
+
 async def test_refuses_a_command_over_2_mib_locally_and_stays_connected(
     opened: list[Channel],
 ) -> None:
@@ -372,6 +513,9 @@ async def test_refuses_a_command_over_2_mib_locally_and_stays_connected(
 
     assert [message.payload for message in received] == [b"after"]
     assert publisher.state == "connected"
+
+
+# end function test_refuses_a_command_over_2_mib_locally_and_stays_connected
 
 
 @pytest.mark.timeout(90)
@@ -406,3 +550,6 @@ async def test_delivers_a_paced_burst_of_50_messages_in_publish_order_one_time_e
 
     assert [message.payload for message in received] == bodies
     assert len({message.metadata.message_id for message in received}) == 50
+
+
+# end function test_delivers_a_paced_burst_of_50_messages_in_publish_order_one_time_each

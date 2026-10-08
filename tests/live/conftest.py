@@ -31,6 +31,9 @@ def load_environment() -> None:
         os.environ.setdefault(key.strip(), value.strip().strip("'\""))
 
 
+# end function load_environment
+
+
 @pytest.fixture(scope="session", autouse=True)
 def realtime() -> str:
     """Fails the run at once when the target cannot be used, instead of
@@ -62,6 +65,9 @@ def realtime() -> str:
     return os.environ["CELERIS_WS_URL"]
 
 
+# end function realtime
+
+
 @pytest.fixture
 async def proxy() -> AsyncIterator[DroppingProxy]:
     """A dropping proxy in front of CELERIS_WS_URL, at its own url."""
@@ -76,6 +82,9 @@ async def proxy() -> AsyncIterator[DroppingProxy]:
         dropping.drop_all()
 
 
+# end function proxy
+
+
 @pytest.fixture
 async def opened() -> AsyncIterator[list[Channel]]:
     """Every channel a test opens, closed even when the test fails."""
@@ -84,3 +93,6 @@ async def opened() -> AsyncIterator[list[Channel]]:
 
     for channel in channels:
         await channel.close()
+
+
+# end function opened

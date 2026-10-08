@@ -59,6 +59,9 @@ def sign_credentials(client_id: str, signing_secret: str, **claims: Any) -> Cred
     )
 
 
+# end function sign_credentials
+
+
 def sign_raw_payload(
     client_id: str, signing_secret: str, payload_text: str
 ) -> Credentials:
@@ -73,12 +76,21 @@ def sign_raw_payload(
     return Credentials(payload=payload, signature=signature)
 
 
+# end function sign_raw_payload
+
+
 def now_ms() -> int:
     return int(time.time() * 1000)
 
 
+# end function now_ms
+
+
 def websocket_url() -> str:
     return os.environ["CELERIS_WS_URL"]
+
+
+# end function websocket_url
 
 
 # Optional: a gateway that routes to a different server node, used for the
@@ -88,16 +100,28 @@ def peer_websocket_url() -> str:
     return os.environ["CELERIS_WS_URL_PEER"]
 
 
+# end function peer_websocket_url
+
+
 def client_id() -> str:
     return os.environ["CELERIS_CLIENT_ID"]
+
+
+# end function client_id
 
 
 def signing_secret() -> str:
     return os.environ["CELERIS_SIGNING_SECRET"]
 
 
+# end function signing_secret
+
+
 def unique_channel_reference(label: str) -> str:
     return f"pyqual-{label}-{now_ms()}-{next(_channel_counter)}"
+
+
+# end function unique_channel_reference
 
 
 def client_with(
@@ -106,6 +130,8 @@ def client_with(
     async def provide(request: CredentialRequest) -> Credentials:
         return credentials()
 
+    # end function provide
+
     return create_client(
         base_url=base_url or websocket_url(),
         allow_insecure_loopback=True,
@@ -113,11 +139,17 @@ def client_with(
     )
 
 
+# end function client_with
+
+
 def qualification_client(base_url: str | None = None, **claims: Any) -> Client:
     return client_with(
         lambda: sign_credentials(client_id(), signing_secret(), **dict(claims)),
         base_url,
     )
+
+
+# end function qualification_client
 
 
 # Positional-only, so a token's own "reference" claim can be passed too. A
@@ -139,6 +171,9 @@ async def connected_channel(
     return channel
 
 
+# end function connected_channel
+
+
 async def started(waiter: Coroutine[Any, Any, Value]) -> asyncio.Future[Value]:
     """Starts a wait so its listener is registered; await the result after the
     action that causes the event."""
@@ -146,6 +181,9 @@ async def started(waiter: Coroutine[Any, Any, Value]) -> asyncio.Future[Value]:
     await asyncio.sleep(0)
 
     return pending
+
+
+# end function started
 
 
 async def wait_for(
@@ -160,6 +198,8 @@ async def wait_for(
         if not arrived.done() and predicate(value):
             arrived.set_result(value)
 
+    # end function deliver
+
     dispose = register(deliver)
 
     try:
@@ -170,10 +210,16 @@ async def wait_for(
         dispose()
 
 
+# end function wait_for
+
+
 @dataclass(frozen=True)
 class DeliveredMessage:
     payload: bytes
     metadata: MessageMetadata
+
+
+# end class DeliveredMessage
 
 
 def collect(channel: Channel, segment_id: str) -> list[DeliveredMessage]:
@@ -184,6 +230,9 @@ def collect(channel: Channel, segment_id: str) -> list[DeliveredMessage]:
     channel.segment(segment_id).subscribe()
 
     return received
+
+
+# end function collect
 
 
 async def next_message(
@@ -197,7 +246,12 @@ async def next_message(
             lambda payload, metadata: deliver(DeliveredMessage(payload, metadata))
         )
 
+    # end function register
+
     return await wait_for(register, predicate, description, timeout_s)
+
+
+# end function next_message
 
 
 async def next_notice(
@@ -209,6 +263,9 @@ async def next_notice(
     return await wait_for(channel.events().on_notice, predicate, description, timeout_s)
 
 
+# end function next_notice
+
+
 async def next_presence(
     segment: Segment,
     predicate: Callable[[PresenceEvent], bool],
@@ -218,6 +275,9 @@ async def next_presence(
     return await wait_for(segment.on_presence, predicate, description, timeout_s)
 
 
+# end function next_presence
+
+
 async def next_error(
     channel: Channel,
     predicate: Callable[[ChannelError], bool],
@@ -225,6 +285,9 @@ async def next_error(
     timeout_s: float = 15,
 ) -> ChannelError:
     return await wait_for(channel.events().on_error, predicate, description, timeout_s)
+
+
+# end function next_error
 
 
 class DroppingProxy:
@@ -248,6 +311,8 @@ class DroppingProxy:
         self._silenced: set[asyncio.StreamWriter] = set()
         self._upstream_flowing = asyncio.Event()
         self._upstream_flowing.set()
+
+    # end method __init__
 
     async def link(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -276,6 +341,8 @@ class DroppingProxy:
             return_exceptions=True,
         )
 
+    # end method link
+
     async def _pipe(
         self,
         reader: asyncio.StreamReader,
@@ -300,8 +367,12 @@ class DroppingProxy:
 
         writer.transport.abort()
 
+    # end method _pipe
+
     def blackhole_open_links(self) -> None:
         self._silenced.update(self._sockets)
+
+    # end method blackhole_open_links
 
     def stall_upstream(self, stalled: bool) -> None:
         if stalled:
@@ -309,9 +380,16 @@ class DroppingProxy:
         else:
             self._upstream_flowing.set()
 
+    # end method stall_upstream
+
     def drop_all(self) -> None:
         for socket in self._sockets:
             socket.transport.abort()
 
         self._sockets.clear()
         self._silenced.clear()
+
+    # end method drop_all
+
+
+# end class DroppingProxy

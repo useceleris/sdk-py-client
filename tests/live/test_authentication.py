@@ -45,6 +45,9 @@ async def test_connects_with_valid_credentials_and_receives_the_greetings() -> N
     await channel.close()
 
 
+# end function test_connects_with_valid_credentials_and_receives_the_greetings
+
+
 async def test_rejects_an_invalid_signature_as_transport() -> None:
     # DEV-02: a refused handshake is never labelled an authorization failure.
     channel = client_with(
@@ -58,6 +61,9 @@ async def test_rejects_an_invalid_signature_as_transport() -> None:
     assert channel.state == "failed"
 
 
+# end function test_rejects_an_invalid_signature_as_transport
+
+
 async def test_rejects_an_unknown_client_id() -> None:
     channel = client_with(
         lambda: sign_credentials("no-such-client", signing_secret())
@@ -69,18 +75,19 @@ async def test_rejects_an_unknown_client_id() -> None:
     assert caught.value.code == "Transport"
 
 
-async def test_rejects_expired_and_future_timestamps_inside_the_observed_window() -> (
-    None
-):
+# end function test_rejects_an_unknown_client_id
+
+
+async def test_rejects_timestamps_outside_the_60_second_window() -> None:
     reference = unique_channel_reference("window")
-    expired = qualification_client(timestamp=now_ms() - 61 * 60 * 1_000).channel(
-        reference
-    )
 
-    with pytest.raises(CelerisConnectionError) as caught:
-        await expired.connect()
+    for age_ms in (61 * 1_000, 59 * 60 * 1_000):
+        expired = qualification_client(timestamp=now_ms() - age_ms).channel(reference)
 
-    assert caught.value.code == "Transport"
+        with pytest.raises(CelerisConnectionError) as caught:
+            await expired.connect()
+
+        assert caught.value.code == "Transport"
 
     future = qualification_client(timestamp=now_ms() + 5 * 60 * 1_000).channel(
         reference
@@ -91,13 +98,12 @@ async def test_rejects_expired_and_future_timestamps_inside_the_observed_window(
 
     assert caught.value.code == "Transport"
 
-    # Documented intent is a 60-second window; the server accepts up to 60
-    # minutes (D-001 evidence: recorded, not relied upon).
-    stale = qualification_client(timestamp=now_ms() - 59 * 60 * 1_000).channel(
-        reference
-    )
-    await stale.connect()
-    await stale.close()
+    recent = qualification_client(timestamp=now_ms() - 30 * 1_000).channel(reference)
+    await recent.connect()
+    await recent.close()
+
+
+# end function test_rejects_timestamps_outside_the_60_second_window
 
 
 async def test_rejects_a_channel_outside_the_tokens_restriction() -> None:
@@ -111,12 +117,18 @@ async def test_rejects_a_channel_outside_the_tokens_restriction() -> None:
     assert caught.value.code == "Transport"
 
 
+# end function test_rejects_a_channel_outside_the_tokens_restriction
+
+
 async def test_accepts_a_channel_inside_the_tokens_restriction() -> None:
     reference = unique_channel_reference("allowed")
     channel = await connected_channel(reference, channel_references=[reference])
 
     assert channel.state == "connected"
     await channel.close()
+
+
+# end function test_accepts_a_channel_inside_the_tokens_restriction
 
 
 @pytest.mark.parametrize(
@@ -153,6 +165,9 @@ async def test_refuses_these_claims_as_transport(
     assert channel.state == "failed"
 
 
+# end function test_refuses_these_claims_as_transport
+
+
 async def test_accepts_an_empty_channel_restriction_which_permits_every_channel(
     opened: list[Channel],
 ) -> None:
@@ -161,6 +176,9 @@ async def test_accepts_an_empty_channel_restriction_which_permits_every_channel(
     )
 
     assert channel.state == "connected"
+
+
+# end function test_accepts_an_empty_channel_restriction_which_permits_every_channel
 
 
 async def test_accepts_a_channel_that_is_one_of_several_in_the_restriction(
@@ -176,6 +194,9 @@ async def test_accepts_a_channel_that_is_one_of_several_in_the_restriction(
     assert channel.state == "connected"
 
 
+# end function test_accepts_a_channel_that_is_one_of_several_in_the_restriction
+
+
 async def test_requests_fresh_credentials_for_every_explicit_connect(
     opened: list[Channel],
 ) -> None:
@@ -185,6 +206,8 @@ async def test_requests_fresh_credentials_for_every_explicit_connect(
         requests.append(request)
 
         return sign_credentials(client_id(), signing_secret())
+
+    # end function provide
 
     client = create_client(
         base_url=websocket_url(),
@@ -204,3 +227,6 @@ async def test_requests_fresh_credentials_for_every_explicit_connect(
 
     assert [request.reason for request in requests] == ["initial", "initial"]
     assert all(request.channel_reference == reference for request in requests)
+
+
+# end function test_requests_fresh_credentials_for_every_explicit_connect

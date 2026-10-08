@@ -31,11 +31,17 @@ async def opened() -> AsyncIterator[list[Channel]]:
         await channel.close()
 
 
+# end function opened
+
+
 async def open_channel(opened: list[Channel], reference: str, **claims: Any) -> Channel:
     channel = await connected_channel(reference, **claims)
     opened.append(channel)
 
     return channel
+
+
+# end function open_channel
 
 
 def received(channel: Channel, segment_id: str) -> list[tuple[bytes, str]]:
@@ -48,8 +54,14 @@ def received(channel: Channel, segment_id: str) -> list[tuple[bytes, str]]:
     return deliveries
 
 
+# end function received
+
+
 def bodies(deliveries: list[tuple[bytes, str]]) -> list[bytes]:
     return [payload for payload, _ in deliveries]
+
+
+# end function bodies
 
 
 async def arrival(
@@ -70,11 +82,17 @@ async def arrival(
     return delivered
 
 
+# end function arrival
+
+
 async def publish_all(
     publisher: Channel, segment_id: str, message_bodies: list[bytes]
 ) -> None:
     for body in message_bodies:
         await publisher.segment(segment_id).publish(body)
+
+
+# end function publish_all
 
 
 async def test_replays_recent_messages_with_identical_ids(
@@ -106,6 +124,9 @@ async def test_replays_recent_messages_with_identical_ids(
         assert GENERATED_MESSAGE_ID.fullmatch(message_id)
 
 
+# end function test_replays_recent_messages_with_identical_ids
+
+
 async def test_replays_nothing_to_a_token_without_a_replay_claim(
     opened: list[Channel],
 ) -> None:
@@ -128,6 +149,9 @@ async def test_replays_nothing_to_a_token_without_a_replay_claim(
     assert bodies(history) == [b"live"]
 
 
+# end function test_replays_nothing_to_a_token_without_a_replay_claim
+
+
 async def test_replays_in_publish_order(opened: list[Channel]) -> None:
     reference = unique_channel_reference("replay-order")
     publisher = await open_channel(opened, reference)
@@ -143,6 +167,9 @@ async def test_replays_in_publish_order(opened: list[Channel]) -> None:
     await asyncio.sleep(1.5)
 
     assert bodies(history) == published
+
+
+# end function test_replays_in_publish_order
 
 
 @pytest.mark.timeout(120)
@@ -168,6 +195,9 @@ async def test_replays_at_most_the_last_100_messages_of_a_segment(
     assert bodies(history) == published[-BACKLOG_CAPACITY:]
 
 
+# end function test_replays_at_most_the_last_100_messages_of_a_segment
+
+
 async def test_replays_only_the_window_of_a_numeric_replay_claim(
     opened: list[Channel],
 ) -> None:
@@ -188,6 +218,9 @@ async def test_replays_only_the_window_of_a_numeric_replay_claim(
     assert bodies(history) == [b"recent"]
 
 
+# end function test_replays_only_the_window_of_a_numeric_replay_claim
+
+
 async def test_replays_the_default_segment_on_connect(
     opened: list[Channel],
 ) -> None:
@@ -205,6 +238,9 @@ async def test_replays_the_default_segment_on_connect(
     await last
 
     assert bodies(lobby) == [b"d1", b"d2"]
+
+
+# end function test_replays_the_default_segment_on_connect
 
 
 async def test_replays_each_segments_backlog_when_that_segment_is_joined(
@@ -233,6 +269,9 @@ async def test_replays_each_segments_backlog_when_that_segment_is_joined(
     assert bodies(beta) == [b"b1"]
 
 
+# end function test_replays_each_segments_backlog_when_that_segment_is_joined
+
+
 async def test_replays_to_a_segment_joined_by_publishing(
     opened: list[Channel],
 ) -> None:
@@ -249,6 +288,9 @@ async def test_replays_to_a_segment_joined_by_publishing(
     await asyncio.sleep(1.5)
 
     assert bodies(history) == [b"h1"]
+
+
+# end function test_replays_to_a_segment_joined_by_publishing
 
 
 async def test_recovers_what_a_rejoin_missed_and_drops_what_it_already_delivered(
@@ -282,6 +324,9 @@ async def test_recovers_what_a_rejoin_missed_and_drops_what_it_already_delivered
     assert len({message_id for _, message_id in history}) == 3
 
 
+# end function test_recovers_what_a_rejoin_missed_and_drops_what_it_already_delivered
+
+
 async def test_replays_to_the_channel_listener_one_time_for_each_message(
     opened: list[Channel],
 ) -> None:
@@ -296,10 +341,14 @@ async def test_replays_to_the_channel_listener_one_time_for_each_message(
     def record(payload: bytes, metadata: MessageMetadata) -> None:
         seen.append(f"{metadata.segment_id}:{payload.decode()}")
 
+    # end function record
+
     receiver.events().on_message(record)
 
     def register(deliver: Callable[[list[str]], None]) -> Callable[[], None]:
         return receiver.events().on_message(lambda payload, metadata: deliver(seen))
+
+    # end function register
 
     both = asyncio.ensure_future(
         wait_for(
@@ -320,3 +369,6 @@ async def test_replays_to_the_channel_listener_one_time_for_each_message(
     await asyncio.sleep(4)
 
     assert seen == ["history:h1", "history:h2"]
+
+
+# end function test_replays_to_the_channel_listener_one_time_for_each_message
