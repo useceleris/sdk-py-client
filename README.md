@@ -13,7 +13,7 @@ A `Channel` is one WebSocket client: creating another `Channel`, even for the sa
 ## Install
 
 ```sh
-pip install --pre useceleris-client
+pip install useceleris-client
 ```
 
 Python 3.10 to 3.14. The package ships type information (`py.typed`) and depends on `pydantic`, `websockets` and `typing-extensions`. It contains no signing code: a trusted server signs credentials with [`useceleris-server`](https://pypi.org/project/useceleris-server/).

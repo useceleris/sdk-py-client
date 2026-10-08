@@ -35,7 +35,7 @@ release: committed dist
 	@echo "Uploading $(NAME) $(VERSION) to PyPI. A version can never be uploaded twice."
 	uv publish
 
-# --prerelease allow matches the documented `pip install --pre`.
+# --prerelease allow also accepts a pre-release version.
 smoke:
 	uv run --isolated --no-project --refresh --prerelease allow --with "$(NAME)==$(VERSION)" python -c "import $(MODULE)"
 	@echo "$(NAME) $(VERSION) installs from PyPI and imports."
