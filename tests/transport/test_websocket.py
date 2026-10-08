@@ -3,6 +3,8 @@ import logging
 import shutil
 import ssl
 import subprocess
+import threading
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from http import HTTPStatus
@@ -13,6 +15,8 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.http11 import Request, Response
+from websockets.sync.server import ServerConnection as SyncServerConnection
+from websockets.sync.server import serve as serve_on_a_thread
 
 from useceleris_client import (
     CelerisConnectionError,
@@ -22,6 +26,7 @@ from useceleris_client import (
     create_client,
 )
 from useceleris_client._connection import ConnectionHandle, open_connection
+from useceleris_client._constants import TRANSPORT_THREAD_NAME
 from useceleris_client._messages import NoticeFrame, ServerMessage
 from useceleris_client._websocket import WebSocket
 
@@ -42,15 +47,26 @@ class LocalServer:
         self.paths.append(connection.request.path)
         await self.handle(connection)
 
+    # end method serve
+
+
+# end class LocalServer
+
 
 async def collect(connection: ServerConnection, server: LocalServer) -> None:
     async for message in connection:
         server.received.append(message)
 
 
+# end function collect
+
+
 async def discard(connection: ServerConnection) -> None:
     async for _ in connection:
         pass
+
+
+# end function discard
 
 
 @pytest.fixture
@@ -62,9 +78,15 @@ async def local_server() -> AsyncIterator[LocalServer]:
         yield server
 
 
+# end function local_server
+
+
 def port_of(server: Server) -> int:
     port: int = server.sockets[0].getsockname()[1]
     return port
+
+
+# end function port_of
 
 
 @dataclass
@@ -74,8 +96,14 @@ class Events:
     closed: asyncio.Event = field(default_factory=asyncio.Event)
 
 
+# end class Events
+
+
 async def provide(request: object) -> Credentials:
     return CREDENTIALS
+
+
+# end function provide
 
 
 async def connect_to(url: str, events: Events, **options: Any) -> ConnectionHandle:
@@ -93,6 +121,9 @@ async def connect_to(url: str, events: Events, **options: Any) -> ConnectionHand
     )
 
 
+# end function connect_to
+
+
 async def eventually(condition: Callable[[], bool]) -> None:
     for _ in range(500):
         if condition():
@@ -103,6 +134,9 @@ async def eventually(condition: Callable[[], bool]) -> None:
     raise AssertionError("The condition did not hold within five seconds.")
 
 
+# end function eventually
+
+
 async def test_opens_with_the_credential_url_and_exchanges_binary_frames(
     local_server: LocalServer,
 ) -> None:
@@ -111,6 +145,8 @@ async def test_opens_with_the_credential_url_and_exchanges_binary_frames(
     async def notify_then_collect(connection: ServerConnection) -> None:
         await connection.send(b"@SERVER_MSG\n:1\n$2\nhi\n")
         await collect(connection, local_server)
+
+    # end function notify_then_collect
 
     local_server.handle = notify_then_collect
     handle = await connect_to(local_server.url, events)
@@ -134,6 +170,9 @@ async def test_opens_with_the_credential_url_and_exchanges_binary_frames(
     assert not handle.is_open
 
 
+# end function test_opens_with_the_credential_url_and_exchanges_binary_frames
+
+
 async def test_reports_a_text_frame_as_a_protocol_error_and_stays_open(
     local_server: LocalServer,
 ) -> None:
@@ -144,6 +183,8 @@ async def test_reports_a_text_frame_as_a_protocol_error_and_stays_open(
         await connection.send(b"@SERVER_MSG\n:1\n$0\n\n")
         await collect(connection, local_server)
 
+    # end function send_text
+
     local_server.handle = send_text
     handle = await connect_to(local_server.url, events)
     await eventually(lambda: bool(events.messages))
@@ -153,6 +194,9 @@ async def test_reports_a_text_frame_as_a_protocol_error_and_stays_open(
     assert handle.is_open
     handle.close()
     await asyncio.wait_for(events.closed.wait(), 5)
+
+
+# end function test_reports_a_text_frame_as_a_protocol_error_and_stays_open
 
 
 async def test_receives_frames_larger_than_one_mebibyte(
@@ -171,6 +215,8 @@ async def test_receives_frames_larger_than_one_mebibyte(
         )
         await collect(connection, local_server)
 
+    # end function send_large
+
     local_server.handle = send_large
     handle = await connect_to(local_server.url, events)
     await eventually(lambda: bool(events.messages))
@@ -182,6 +228,9 @@ async def test_receives_frames_larger_than_one_mebibyte(
     await asyncio.wait_for(events.closed.wait(), 5)
 
 
+# end function test_receives_frames_larger_than_one_mebibyte
+
+
 async def test_sends_queued_frames_ahead_of_the_close() -> None:
     received: list[bytes | str] = []
     finished = asyncio.Event()
@@ -191,6 +240,8 @@ async def test_sends_queued_frames_ahead_of_the_close() -> None:
             received.append(message)
 
         finished.set()
+
+    # end function collect_all
 
     async with serve(collect_all, "127.0.0.1", 0) as running:
         events = Events()
@@ -206,9 +257,14 @@ async def test_sends_queued_frames_ahead_of_the_close() -> None:
     assert received == [f"frame-{index}".encode() for index in range(5)]
 
 
+# end function test_sends_queued_frames_ahead_of_the_close
+
+
 async def test_reports_a_server_initiated_close() -> None:
     async def close_at_once(connection: ServerConnection) -> None:
         await connection.close()
+
+    # end function close_at_once
 
     async with serve(close_at_once, "127.0.0.1", 0) as running:
         events = Events()
@@ -218,12 +274,19 @@ async def test_reports_a_server_initiated_close() -> None:
     assert events.errors == []
 
 
+# end function test_reports_a_server_initiated_close
+
+
 async def test_reports_a_refused_handshake_as_a_transport_failure() -> None:
     def refuse(connection: ServerConnection, request: Request) -> Response:
         return connection.respond(HTTPStatus.UNAUTHORIZED, "no\n")
 
+    # end function refuse
+
     async def unused(connection: ServerConnection) -> None:
         raise AssertionError("unreachable")
+
+    # end function unused
 
     async with serve(unused, "127.0.0.1", 0, process_request=refuse) as running:
         with pytest.raises(CelerisConnectionError) as caught:
@@ -231,6 +294,9 @@ async def test_reports_a_refused_handshake_as_a_transport_failure() -> None:
 
     assert caught.value.code == "Transport"
     assert str(caught.value).startswith("WebSocket handshake failed")
+
+
+# end function test_reports_a_refused_handshake_as_a_transport_failure
 
 
 async def test_reports_an_unreachable_server_as_a_transport_failure() -> None:
@@ -243,10 +309,16 @@ async def test_reports_an_unreachable_server_as_a_transport_failure() -> None:
     assert caught.value.code == "Transport"
 
 
+# end function test_reports_an_unreachable_server_as_a_transport_failure
+
+
 @dataclass(frozen=True)
 class SelfSignedCertificate:
     context: ssl.SSLContext
     path: Path
+
+
+# end class SelfSignedCertificate
 
 
 @pytest.fixture
@@ -281,6 +353,9 @@ def self_signed_certificate(tmp_path: Path) -> SelfSignedCertificate:
     return SelfSignedCertificate(context, certificate)
 
 
+# end function self_signed_certificate
+
+
 async def test_rejects_a_server_certificate_it_cannot_verify(
     self_signed_certificate: SelfSignedCertificate,
 ) -> None:
@@ -292,6 +367,9 @@ async def test_rejects_a_server_certificate_it_cannot_verify(
             await connect_to(f"wss://127.0.0.1:{port_of(running)}", Events())
 
     assert caught.value.code == "Transport"
+
+
+# end function test_rejects_a_server_certificate_it_cannot_verify
 
 
 async def test_accepts_the_same_certificate_once_it_is_trusted(
@@ -310,6 +388,9 @@ async def test_accepts_the_same_certificate_once_it_is_trusted(
         await asyncio.wait_for(events.closed.wait(), 5)
 
 
+# end function test_accepts_the_same_certificate_once_it_is_trusted
+
+
 async def test_closing_while_connecting_reports_error_then_close() -> None:
     order: list[str] = []
     closed = asyncio.Event()
@@ -320,6 +401,8 @@ async def test_closing_while_connecting_reports_error_then_close() -> None:
         handshake_started.set()
         await release_handshake.wait()
 
+    # end function stall
+
     async with serve(discard, "127.0.0.1", 0, process_request=stall) as running:
         socket = WebSocket(f"ws://127.0.0.1:{port_of(running)}")
         socket.on_error = lambda: order.append("error")
@@ -327,6 +410,8 @@ async def test_closing_while_connecting_reports_error_then_close() -> None:
         def record_close() -> None:
             order.append("close")
             closed.set()
+
+        # end function record_close
 
         socket.on_close = record_close
         await asyncio.wait_for(handshake_started.wait(), 5)
@@ -339,6 +424,9 @@ async def test_closing_while_connecting_reports_error_then_close() -> None:
     assert socket.ready_state == WebSocket.CLOSED
 
 
+# end function test_closing_while_connecting_reports_error_then_close
+
+
 async def test_a_client_round_trips_a_message_through_a_local_server() -> None:
     # Echoes every PUB back as a MSG on the same segment.
     async def echo(connection: ServerConnection) -> None:
@@ -347,6 +435,8 @@ async def test_a_client_round_trips_a_message_through_a_local_server() -> None:
 
             if frame.startswith(b"@PUB\n"):
                 await connection.send(b"@MSG\n+user\n+chat\n+echo-1\n:7\n$5\nhello\n")
+
+    # end function echo
 
     async with serve(echo, "127.0.0.1", 0) as running:
         client = create_client(
@@ -379,6 +469,9 @@ async def test_a_client_round_trips_a_message_through_a_local_server() -> None:
     assert channel.state == "closed"
 
 
+# end function test_a_client_round_trips_a_message_through_a_local_server
+
+
 async def test_reports_the_open_before_any_frame_sent_with_the_handshake() -> None:
     # A browser resolves the open before it delivers a message. Frames the
     # server sends with its handshake response must not reach listeners while
@@ -386,6 +479,8 @@ async def test_reports_the_open_before_any_frame_sent_with_the_handshake() -> No
     async def greet(connection: ServerConnection) -> None:
         await connection.send(b"@MSG\n+user\n+default\n+early-1\n:1\n$1\nx\n")
         await discard(connection)
+
+    # end function greet
 
     async with serve(greet, "127.0.0.1", 0) as running:
         channel = create_client(
@@ -404,6 +499,9 @@ async def test_reports_the_open_before_any_frame_sent_with_the_handshake() -> No
         await channel.close()
 
     assert log[:3] == ["state:connecting", "state:connected", "message in connected"]
+
+
+# end function test_reports_the_open_before_any_frame_sent_with_the_handshake
 
 
 async def test_keeps_credentials_out_of_the_logs(
@@ -430,6 +528,9 @@ async def test_keeps_credentials_out_of_the_logs(
     assert not any("payload=" in message for message in client_records)
 
 
+# end function test_keeps_credentials_out_of_the_logs
+
+
 async def test_closes_within_the_budget_when_the_peer_stops_reading(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -439,6 +540,8 @@ async def test_closes_within_the_budget_when_the_peer_stops_reading(
     # bytes, and the client's writer can no longer drain.
     async def never_read(connection: ServerConnection) -> None:
         await connection.wait_closed()
+
+    # end function never_read
 
     # A short close timeout: the server, no longer reading, only notices the
     # aborted connection when it shuts down.
@@ -463,3 +566,137 @@ async def test_closes_within_the_budget_when_the_peer_stops_reading(
 
     assert socket.ready_state == WebSocket.CLOSED
     assert socket.buffered_amount == 0
+
+
+# end function test_closes_within_the_budget_when_the_peer_stops_reading
+
+
+def transport_threads() -> list[threading.Thread]:
+    return [
+        thread
+        for thread in threading.enumerate()
+        if thread.name == TRANSPORT_THREAD_NAME
+    ]
+
+
+# end function transport_threads
+
+
+# HEARTBEAT-01: the connection lives on its own thread, so a listener that
+# holds the caller's loop does not stop the library answering pings.
+async def test_answers_pings_while_a_listener_blocks_the_callers_loop() -> None:
+    pong_times: list[float] = []
+
+    def ping_during_the_block(connection: SyncServerConnection) -> None:
+        connection.send(b"@SERVER_MSG\n:1\n$5\nblock\n")
+        time.sleep(0.3)
+
+        for _ in range(3):
+            if connection.ping().wait(1):
+                pong_times.append(time.monotonic())
+
+            time.sleep(0.2)
+
+        for _ in connection:
+            pass
+
+    # end function ping_during_the_block
+
+    with serve_on_a_thread(ping_during_the_block, "127.0.0.1", 0) as server:
+        serving = threading.Thread(target=server.serve_forever, daemon=True)
+        serving.start()
+        channel = create_client(
+            base_url=f"ws://127.0.0.1:{server.socket.getsockname()[1]}",
+            allow_insecure_loopback=True,
+            credential_provider=provide,
+        ).channel("room-1")
+        blocked: list[float] = []
+
+        def block(notice: object) -> None:
+            blocked.append(time.monotonic())
+            time.sleep(1.5)
+            blocked.append(time.monotonic())
+
+        # end function block
+
+        channel.events().on_notice(block)
+        await channel.connect()
+        await eventually(lambda: len(blocked) == 2)
+        await channel.close()
+        server.shutdown()
+        serving.join()
+
+    block_started, block_ended = blocked
+    assert len(pong_times) == 3
+    assert all(block_started < pong_time < block_ended for pong_time in pong_times)
+
+
+# end function test_answers_pings_while_a_listener_blocks_the_callers_loop
+
+
+async def test_close_joins_the_transport_thread(local_server: LocalServer) -> None:
+    events = Events()
+    handle = await connect_to(local_server.url, events)
+    assert len(transport_threads()) == 1
+
+    handle.close()
+    await asyncio.wait_for(events.closed.wait(), 5)
+
+    assert transport_threads() == []
+
+
+# end function test_close_joins_the_transport_thread
+
+
+async def test_leaves_no_thread_after_50_connect_and_close_cycles() -> None:
+    async with serve(discard, "127.0.0.1", 0) as running:
+        client = create_client(
+            base_url=f"ws://127.0.0.1:{port_of(running)}",
+            allow_insecure_loopback=True,
+            credential_provider=provide,
+        )
+
+        for _ in range(50):
+            channel = client.channel("room-1")
+            await channel.connect()
+            await channel.close()
+
+    assert transport_threads() == []
+
+
+# end function test_leaves_no_thread_after_50_connect_and_close_cycles
+
+
+def test_ends_the_thread_when_the_callers_loop_closes_without_a_close() -> None:
+    def hold(connection: SyncServerConnection) -> None:
+        for _ in connection:
+            pass
+
+    # end function hold
+
+    async def open_and_walk_away(url: str) -> None:
+        socket = WebSocket(url)
+        opened = asyncio.Event()
+        socket.on_open = opened.set
+        await asyncio.wait_for(opened.wait(), 5)
+
+    # end function open_and_walk_away
+
+    with serve_on_a_thread(hold, "127.0.0.1", 0) as server:
+        serving = threading.Thread(target=server.serve_forever, daemon=True)
+        serving.start()
+        asyncio.run(
+            open_and_walk_away(f"ws://127.0.0.1:{server.socket.getsockname()[1]}")
+        )
+        deadline = time.monotonic() + 3
+
+        while transport_threads() and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+        server.shutdown()
+        serving.join()
+
+    assert transport_threads() == []
+
+
+# end function test_ends_the_thread_when_the_callers_loop_closes_without_a_close

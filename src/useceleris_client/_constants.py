@@ -125,4 +125,11 @@ REPLAY_LOOKBACK_CAP_MS = 4_294_967_295
 
 CLOSE_BUDGET_MS = 5_000
 
+# The connection runs on its own thread (HEARTBEAT-01), named so it can be
+# found, and it checks this often whether the caller's loop has closed under
+# it.
+TRANSPORT_THREAD_NAME = "useceleris-client-transport"
+
+USER_LOOP_CHECK_INTERVAL_MS = 500
+
 DEDUP_WINDOW_SIZE = 1024

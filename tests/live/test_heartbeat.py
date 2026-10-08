@@ -51,6 +51,8 @@ async def test_a_listener_blocking_ninety_seconds_keeps_its_connection(
         time.sleep(90)
         listener_returned.set_result(None)
 
+    # end function block
+
     blocking.segment("chat").on_message(lambda payload, metadata: block(payload))
     await asyncio.sleep(1.5)
 
@@ -75,6 +77,9 @@ async def test_a_listener_blocking_ninety_seconds_keeps_its_connection(
     assert blocking.state == "connected"
 
 
+# end function test_a_listener_blocking_ninety_seconds_keeps_its_connection
+
+
 # HEARTBEAT-01: a path that silently stops carrying anything, while TCP to the
 # proxy stays up, is found dead by the websockets library's keepalive. It
 # pings every 20 s and fails the connection when a pong is 20 s late, then
@@ -92,6 +97,8 @@ async def test_a_silently_dead_path_is_found_and_recovered(
             reconnects.append(request)
 
         return sign_credentials(client_id(), signing_secret())
+
+    # end function provide
 
     channel = create_client(
         base_url=proxy.url, allow_insecure_loopback=True, credential_provider=provide
@@ -134,3 +141,6 @@ async def test_a_silently_dead_path_is_found_and_recovered(
     await after
 
     assert channel.state == "connected"
+
+
+# end function test_a_silently_dead_path_is_found_and_recovered
