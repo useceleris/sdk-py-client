@@ -15,10 +15,20 @@ def sockets(monkeypatch: pytest.MonkeyPatch) -> list[FakeWebSocket]:
             super().__init__(url)
             created.append(self)
 
+        # end method __init__
+
+    # end class RecordedWebSocket
+
     monkeypatch.setattr(_connection, "WebSocket", RecordedWebSocket)
     return created
+
+
+# end function sockets
 
 
 @pytest.fixture
 def timers() -> FakeTimers:
     return FakeTimers()
+
+
+# end function timers

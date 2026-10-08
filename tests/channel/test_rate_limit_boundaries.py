@@ -23,8 +23,14 @@ async def setup(sockets: list[FakeWebSocket], timers: FakeTimers) -> ChannelSetu
     return await establish(create_test_channel(timers), sockets)
 
 
+# end function setup
+
+
 def rate_limit_frame() -> bytes:
     return error_frame("RateLimitError", "Rate limit exceeded")
+
+
+# end function rate_limit_frame
 
 
 async def exhaust_rate_limit(socket: FakeWebSocket, timers: FakeTimers) -> None:
@@ -33,11 +39,19 @@ async def exhaust_rate_limit(socket: FakeWebSocket, timers: FakeTimers) -> None:
         await timers.advance(31_000)
 
 
+# end function exhaust_rate_limit
+
+
 def bump_buffer(socket: FakeWebSocket) -> None:
     def bump(data: bytes) -> None:
         socket.buffered_amount += 1
 
+    # end function bump
+
     socket.send.side_effect = bump
+
+
+# end function bump_buffer
 
 
 class TestSuspectWindow:
@@ -54,6 +68,8 @@ class TestSuspectWindow:
 
         assert sockets[-1].sent_frames() == ["@SUB\n$4\nchat\n", "@SUB\n$5\nlobby\n"]
 
+    # end method test_resends_a_subscription_sent_exactly_at_its_edge
+
     async def test_resends_a_publish_sent_exactly_at_its_edge(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -67,6 +83,8 @@ class TestSuspectWindow:
         await timers.advance(1_000)
 
         assert len(sockets[-1].sent_frames()) == 2
+
+    # end method test_resends_a_publish_sent_exactly_at_its_edge
 
     async def test_puts_resent_publishes_ahead_of_ones_already_waiting(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -92,6 +110,11 @@ class TestSuspectWindow:
 
         assert socket.sent_frames()[-1].endswith("$1\nb\n")
 
+    # end method test_puts_resent_publishes_ahead_of_ones_already_waiting
+
+
+# end class TestSuspectWindow
+
 
 class TestStreak:
     async def streak_case(
@@ -113,6 +136,8 @@ class TestStreak:
         await timers.advance(1)
         assert socket.sent_frames() == ["@SUB\n$5\nlobby\n"]
 
+    # end method streak_case
+
     @pytest.mark.parametrize("at", [2_500, 3_500])
     async def test_continues_until_the_streak_ends(
         self,
@@ -122,6 +147,8 @@ class TestStreak:
         at: float,
     ) -> None:
         await self.streak_case(setup, sockets[-1], timers, at)
+
+    # end method test_continues_until_the_streak_ends
 
     async def test_survives_a_reconnect(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -147,6 +174,11 @@ class TestStreak:
         await timers.advance(4_999)
         restored.send.assert_not_called()
 
+    # end method test_survives_a_reconnect
+
+
+# end class TestStreak
+
 
 class TestQuotaProbe:
     async def test_runs_one_probe_at_a_time(
@@ -163,6 +195,8 @@ class TestQuotaProbe:
 
         assert timers.count == 1
 
+    # end method test_runs_one_probe_at_a_time
+
     async def test_schedules_no_probe_when_nothing_was_dropped(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -172,6 +206,8 @@ class TestQuotaProbe:
         await timers.advance(31_000)
 
         assert timers.count == 0
+
+    # end method test_schedules_no_probe_when_nothing_was_dropped
 
     async def test_drops_only_what_the_last_limit_could_concern(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -185,6 +221,8 @@ class TestQuotaProbe:
             await timers.advance(31_000)
 
         assert timers.count == 0
+
+    # end method test_drops_only_what_the_last_limit_could_concern
 
     async def test_keeps_probing_when_the_probe_itself_is_refused(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -201,6 +239,8 @@ class TestQuotaProbe:
         await timers.advance(119_999)
 
         socket.send.assert_not_called()
+
+    # end method test_keeps_probing_when_the_probe_itself_is_refused
 
     async def test_forgets_dropped_subscriptions_on_a_reconnect(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -222,6 +262,11 @@ class TestQuotaProbe:
 
         assert "@UNSUB\n$4\ngone\n" not in restored.sent_frames()
 
+    # end method test_forgets_dropped_subscriptions_on_a_reconnect
+
+
+# end class TestQuotaProbe
+
 
 class TestQuietSpan:
     async def test_ends_probing_only_after_more_than_the_span(
@@ -242,6 +287,8 @@ class TestQuietSpan:
 
         assert socket.sent_frames() == ["@SUB\n$4\nchat\n"]
 
+    # end method test_ends_probing_only_after_more_than_the_span
+
     async def test_measures_from_the_first_send_after_a_limit(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -260,6 +307,8 @@ class TestQuietSpan:
         await timers.advance(1_000)
 
         assert socket.sent_frames() == ["@SUB\n$5\nlobby\n", "@SUB\n$5\nother\n"]
+
+    # end method test_measures_from_the_first_send_after_a_limit
 
     async def test_counts_a_presence_query_as_the_first_send(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -285,6 +334,11 @@ class TestQuietSpan:
         query.cancel()
         await failure_of(query)
 
+    # end method test_counts_a_presence_query_as_the_first_send
+
+
+# end class TestQuietSpan
+
 
 class TestWriter:
     async def test_keeps_one_drain_timer_for_a_full_writer(
@@ -304,6 +358,8 @@ class TestWriter:
         await timers.advance(50)
         await asyncio.gather(*queued)
 
+    # end method test_keeps_one_drain_timer_for_a_full_writer
+
     async def test_waits_for_a_buffer_too_full_for_the_next_publish(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -315,6 +371,8 @@ class TestWriter:
         sockets[-1].buffered_amount = 0
         await timers.advance(50)
         await pending
+
+    # end method test_waits_for_a_buffer_too_full_for_the_next_publish
 
     async def test_sends_the_next_publish_after_one_fails(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -332,3 +390,8 @@ class TestWriter:
         assert isinstance(error, CelerisConnectionError)
         assert error.code == "DeliveryUnknown"
         await second
+
+    # end method test_sends_the_next_publish_after_one_fails
+
+
+# end class TestWriter

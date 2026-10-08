@@ -28,12 +28,18 @@ def test_rejects_unsafe_url(url: str) -> None:
         validate_base_url(url, True)
 
 
+# end function test_rejects_unsafe_url
+
+
 def test_does_not_chain_the_parse_error() -> None:
     with pytest.raises(ConfigurationError) as caught:
         validate_base_url("wss://example.test:synthetic-secret", True)
 
     assert caught.value.__context__ is None
     assert "synthetic-secret" not in repr(caught.value)
+
+
+# end function test_does_not_chain_the_parse_error
 
 
 @pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "127.1.2.3", "[::1]"])
@@ -44,12 +50,18 @@ def test_requires_explicit_opt_in_for_loopback(host: str) -> None:
     assert validate_base_url(f"ws://{host}", True).scheme == "ws"
 
 
+# end function test_requires_explicit_opt_in_for_loopback
+
+
 @pytest.mark.parametrize(
     "host", ["localhost.evil.test", "128.0.0.1", "0.0.0.0", "[::]"]
 )
 def test_rejects_non_loopback_insecure_hosts(host: str) -> None:
     with pytest.raises(ConfigurationError):
         validate_base_url(f"ws://{host}", True)
+
+
+# end function test_rejects_non_loopback_insecure_hosts
 
 
 @pytest.mark.parametrize("reference", ["", "x:y", "a\n", "é", "x" * 256])
@@ -62,6 +74,9 @@ def test_rejects_invalid_channel_reference(reference: str) -> None:
         )
 
 
+# end function test_rejects_invalid_channel_reference
+
+
 @pytest.mark.parametrize("reference", ["a", "a" * 255, "Room_1-A"])
 def test_accepts_a_valid_channel_reference(reference: str) -> None:
     configuration = get_safe_parsed_connection_configuration(
@@ -69,6 +84,9 @@ def test_accepts_a_valid_channel_reference(reference: str) -> None:
     )
 
     assert configuration["channel_reference"] == reference
+
+
+# end function test_accepts_a_valid_channel_reference
 
 
 @pytest.mark.parametrize(
@@ -86,3 +104,6 @@ def test_preserves_path_and_opaque_query_values(base: str) -> None:
     assert result.path == f"{original.path.rstrip('/')}/channel/{'a' * 255}"
     assert parse_qs(result.query) == {"payload": ["+/%=&識"], "signature": ["%2B"]}
     assert original.query == ""
+
+
+# end function test_preserves_path_and_opaque_query_values

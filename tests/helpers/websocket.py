@@ -29,11 +29,15 @@ class FakeWebSocket:
         self.send = Mock()
         self.close = Mock(side_effect=self.disconnect)
 
+    # end method __init__
+
     def open(self) -> None:
         self.ready_state = WebSocket.OPEN
 
         if self.on_open is not None:
             self.on_open()
+
+    # end method open
 
     def receive(self, data: object) -> None:
         # Any data, as a socket could deliver it.
@@ -42,9 +46,13 @@ class FakeWebSocket:
         if untyped is not None:
             untyped(data)
 
+    # end method receive
+
     def fail(self) -> None:
         if self.on_error is not None:
             self.on_error()
+
+    # end method fail
 
     def disconnect(self) -> None:
         self.ready_state = WebSocket.CLOSED
@@ -52,5 +60,12 @@ class FakeWebSocket:
         if self.on_close is not None:
             self.on_close()
 
+    # end method disconnect
+
     def sent_frames(self) -> list[str]:
         return [call.args[0].decode() for call in self.send.call_args_list]
+
+    # end method sent_frames
+
+
+# end class FakeWebSocket

@@ -8,6 +8,9 @@ async def flush(times: int = 20) -> None:
         await asyncio.sleep(0)
 
 
+# end function flush
+
+
 async def failure_of(awaitable: "asyncio.Future[Any]") -> BaseException:
     try:
         await awaitable
@@ -15,3 +18,6 @@ async def failure_of(awaitable: "asyncio.Future[Any]") -> BaseException:
         return error
 
     raise AssertionError("Expected a failure")
+
+
+# end function failure_of

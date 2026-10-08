@@ -9,6 +9,9 @@ def located(message: str, field: str, offset: int) -> str:
     return f"{message} Field: {field}, byte offset {offset}."
 
 
+# end function located
+
+
 @pytest.mark.parametrize(
     ("wire", "message", "field", "offset"),
     [
@@ -124,6 +127,9 @@ def test_reports_field_and_offset(
     assert str(error) == located(message, field, offset)
 
 
+# end function test_reports_field_and_offset
+
+
 @pytest.mark.parametrize("flag", ["2", "-1"])
 def test_rejects_a_presence_flag_other_than_join_or_leave(flag: str) -> None:
     with pytest.raises(ProtocolError) as caught:
@@ -131,6 +137,9 @@ def test_rejects_a_presence_flag_other_than_join_or_leave(flag: str) -> None:
 
     assert str(caught.value) == located("Presence event must be 0 or 1.", "event", 22)
     assert (caught.value.field, caught.value.offset) == ("event", 22)
+
+
+# end function test_rejects_a_presence_flag_other_than_join_or_leave
 
 
 @pytest.mark.parametrize(
@@ -159,11 +168,17 @@ def test_rejects_non_protocol_numeric_text(text: str) -> None:
         decode_server_message(f"@SERVER_MSG\n:{text}\n$0\n\n".encode())
 
 
+# end function test_rejects_non_protocol_numeric_text
+
+
 @pytest.mark.parametrize("text", ["0001", "-0", "-0001"])
 def test_preserves_accepted_decimal_spelling(text: str) -> None:
     decoded = decode_server_message(f"@SERVER_MSG\n:{text}\n$0\n\n".encode())
 
     assert decoded == NoticeFrame(int(text), b"")
+
+
+# end function test_preserves_accepted_decimal_spelling
 
 
 def test_reports_the_field_start_for_invalid_utf8_without_retaining_input() -> None:
@@ -178,6 +193,9 @@ def test_reports_the_field_start_for_invalid_utf8_without_retaining_input() -> N
     assert "synthetic-secret" not in repr(error)
 
 
+# end function test_reports_the_field_start_for_invalid_utf8_without_retaining_input
+
+
 def test_reports_array_resource_limits_at_their_start() -> None:
     with pytest.raises(ProtocolError) as caught:
         decode_server_message(b"*1\n" * 32 + b"*0\n")
@@ -188,11 +206,17 @@ def test_reports_array_resource_limits_at_their_start() -> None:
     assert (caught.value.field, caught.value.offset) == ("messages", 96)
 
 
+# end function test_reports_array_resource_limits_at_their_start
+
+
 def test_reports_a_bulk_that_fills_the_message_without_its_terminator() -> None:
     with pytest.raises(ProtocolError) as caught:
         decode_server_message(b"@SERVER_MSG\n:1\n$1\nx")
 
     assert str(caught.value) == located("Missing bulk byte terminator.", "payload", 15)
+
+
+# end function test_reports_a_bulk_that_fills_the_message_without_its_terminator
 
 
 @pytest.mark.parametrize("name", ["_X", "1X"])
@@ -201,6 +225,9 @@ def test_requires_an_error_name_to_start_with_a_letter(name: str) -> None:
         decode_server_message(f"-Err\n+{name}\n$-1\n$0\n\n$-1\n".encode())
 
     assert str(caught.value) == located("Invalid error name.", "error_type", 5)
+
+
+# end function test_requires_an_error_name_to_start_with_a_letter
 
 
 def test_treats_only_minus_one_as_a_null_sub_type() -> None:
@@ -212,6 +239,9 @@ def test_treats_only_minus_one_as_a_null_sub_type() -> None:
     )
 
 
+# end function test_treats_only_minus_one_as_a_null_sub_type
+
+
 def test_counts_resource_arrays_against_the_depth_limit() -> None:
     header = b"-Err\n+X\n$-1\n$0\n\n"
 
@@ -219,6 +249,9 @@ def test_counts_resource_arrays_against_the_depth_limit() -> None:
 
     with pytest.raises(ProtocolError, match=r"^Arrays are nested deeper than 32"):
         decode_server_message(header + b"*1\n" * 32 + b"$-1\n")
+
+
+# end function test_counts_resource_arrays_against_the_depth_limit
 
 
 @pytest.mark.parametrize(
@@ -234,3 +267,6 @@ def test_bounds_command_and_error_names(wire: bytes, limit: int, field: str) -> 
 
     assert str(caught.value).startswith(f"Line exceeds its {limit}-byte limit.")
     assert caught.value.field == field
+
+
+# end function test_bounds_command_and_error_names

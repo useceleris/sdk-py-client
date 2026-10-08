@@ -26,6 +26,8 @@ class Attempts:
         self.sockets = sockets
         self.timers = timers
 
+    # end method __init__
+
     async def expect_after(self, delay_ms: float) -> None:
         socket_count = len(self.sockets)
 
@@ -39,15 +41,24 @@ class Attempts:
         await flush()
         assert len(self.sockets) == socket_count + 1
 
+    # end method expect_after
+
     async def fail_after(self, delay_ms: float) -> None:
         await self.expect_after(delay_ms)
         self.sockets[-1].fail()
         await flush()
 
+    # end method fail_after
+
     async def succeed_after(self, delay_ms: float) -> None:
         await self.expect_after(delay_ms)
         self.sockets[-1].open()
         await flush()
+
+    # end method succeed_after
+
+
+# end class Attempts
 
 
 @pytest.fixture
@@ -55,9 +66,15 @@ def attempts(sockets: list[FakeWebSocket], timers: FakeTimers) -> Attempts:
     return Attempts(sockets, timers)
 
 
+# end function attempts
+
+
 @pytest.fixture
 async def setup(sockets: list[FakeWebSocket], timers: FakeTimers) -> ChannelSetup:
     return await establish(create_test_channel(timers), sockets)
+
+
+# end function setup
 
 
 def reconnect_requests(setup: ChannelSetup) -> list[CredentialRequest]:
@@ -66,6 +83,9 @@ def reconnect_requests(setup: ChannelSetup) -> list[CredentialRequest]:
         for call in setup.credential_provider.call_args_list
         if call.args[0].reason == "reconnect"
     ]
+
+
+# end function reconnect_requests
 
 
 async def test_bounds_jittered_delays_per_retry_and_fails_after_ten_retries(
@@ -95,6 +115,9 @@ async def test_bounds_jittered_delays_per_retry_and_fails_after_ten_retries(
     assert timers.count == 0
 
 
+# end function test_bounds_jittered_delays_per_retry_and_fails_after_ten_retries
+
+
 async def test_resets_the_retry_budget_only_after_sixty_seconds_connected(
     setup: ChannelSetup, attempts: Attempts, sockets: list[FakeWebSocket]
 ) -> None:
@@ -120,6 +143,9 @@ async def test_resets_the_retry_budget_only_after_sixty_seconds_connected(
     await setup.channel.close()
 
 
+# end function test_resets_the_retry_budget_only_after_sixty_seconds_connected
+
+
 async def test_emits_recovery_after_the_connected_state_with_the_attempt_index(
     setup: ChannelSetup, attempts: Attempts, sockets: list[FakeWebSocket]
 ) -> None:
@@ -138,6 +164,9 @@ async def test_emits_recovery_after_the_connected_state_with_the_attempt_index(
         RecoveryEvent(retry_index=2, possible_gaps=True, possible_duplicates=True),
     ]
     await setup.channel.close()
+
+
+# end function test_emits_recovery_after_the_connected_state_with_the_attempt_index
 
 
 async def test_requests_fresh_credentials_with_the_outage_and_a_capped_lookback(
@@ -168,6 +197,9 @@ async def test_requests_fresh_credentials_with_the_outage_and_a_capped_lookback(
     await setup.channel.close()
 
 
+# end function test_requests_fresh_credentials_with_the_outage_and_a_capped_lookback
+
+
 async def test_fails_immediately_on_deterministic_reconnect_errors(
     setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -183,6 +215,9 @@ async def test_fails_immediately_on_deterministic_reconnect_errors(
     assert len(errors) == 1
     assert isinstance(errors[0], ConfigurationError)
     assert timers.count == 0
+
+
+# end function test_fails_immediately_on_deterministic_reconnect_errors
 
 
 async def test_stays_connected_through_protocol_corruption(
@@ -202,6 +237,9 @@ async def test_stays_connected_through_protocol_corruption(
     assert timers.count == 0
 
 
+# end function test_stays_connected_through_protocol_corruption
+
+
 async def test_enters_reconnecting_once_for_a_transport_error_with_trailing_close(
     setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -215,6 +253,9 @@ async def test_enters_reconnecting_once_for_a_transport_error_with_trailing_clos
     assert timers.count == 1
     await setup.channel.close()
     assert timers.count == 0
+
+
+# end function test_enters_reconnecting_once_for_a_transport_error_with_trailing_close
 
 
 async def test_stops_reconnecting_when_closed_mid_attempt(
@@ -238,6 +279,9 @@ async def test_stops_reconnecting_when_closed_mid_attempt(
     assert timers.count == 0
 
 
+# end function test_stops_reconnecting_when_closed_mid_attempt
+
+
 async def test_does_not_reconnect_when_closed_as_the_retry_timer_fires(
     setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -256,6 +300,9 @@ async def test_does_not_reconnect_when_closed_as_the_retry_timer_fires(
     assert states == ["reconnecting", "closing", "closed"]
     assert len(sockets) == 1
     assert len(reconnect_requests(setup)) == 0
+
+
+# end function test_does_not_reconnect_when_closed_as_the_retry_timer_fires
 
 
 async def test_restores_the_retry_budget_on_an_explicit_connect_from_failed(
@@ -279,6 +326,9 @@ async def test_restores_the_retry_budget_on_an_explicit_connect_from_failed(
     assert setup.channel.state == "connected"
 
 
+# end function test_restores_the_retry_budget_on_an_explicit_connect_from_failed
+
+
 async def test_retries_a_reconnect_attempt_that_times_out(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -289,6 +339,8 @@ async def test_retries_a_reconnect_attempt_that_times_out(
     async def hang(request: CredentialRequest) -> Credentials:
         await asyncio.get_running_loop().create_future()
         raise AssertionError("unreachable")
+
+    # end function hang
 
     setup.credential_provider.side_effect = hang
     sockets[-1].disconnect()
@@ -301,6 +353,9 @@ async def test_retries_a_reconnect_attempt_that_times_out(
     await setup.channel.close()
 
 
+# end function test_retries_a_reconnect_attempt_that_times_out
+
+
 async def test_rounds_a_fractional_outage_up_in_the_lookback(
     setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -311,3 +366,6 @@ async def test_rounds_a_fractional_outage_up_in_the_lookback(
     (request,) = reconnect_requests(setup)
     assert request.replay_lookback_ms == 6_501
     await setup.channel.close()
+
+
+# end function test_rounds_a_fractional_outage_up_in_the_lookback

@@ -17,6 +17,9 @@ async def setup(sockets: list[FakeWebSocket], timers: FakeTimers) -> ChannelSetu
     return await establish(create_test_channel(timers), sockets)
 
 
+# end function setup
+
+
 async def reconnect(sockets: list[FakeWebSocket], timers: FakeTimers) -> None:
     sockets[-1].disconnect()
     await timers.advance(0)
@@ -25,11 +28,19 @@ async def reconnect(sockets: list[FakeWebSocket], timers: FakeTimers) -> None:
     await flush()
 
 
+# end function reconnect
+
+
 def bump_buffer(socket: FakeWebSocket) -> None:
     def bump(data: bytes) -> None:
         socket.buffered_amount += 1
 
+    # end function bump
+
     socket.send.side_effect = bump
+
+
+# end function bump_buffer
 
 
 async def test_restores_current_intent_messages_then_presence_in_order(
@@ -65,6 +76,9 @@ async def test_restores_current_intent_messages_then_presence_in_order(
     ]
 
 
+# end function test_restores_current_intent_messages_then_presence_in_order
+
+
 async def test_sends_restoration_frames_before_the_connected_state_and_recovery(
     setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -89,6 +103,9 @@ async def test_sends_restoration_frames_before_the_connected_state_and_recovery(
     ]
 
 
+# end function test_sends_restoration_frames_before_the_connected_state_and_recovery
+
+
 async def test_keeps_the_default_segment_delivering_without_restoring_it(
     setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -98,6 +115,8 @@ async def test_keeps_the_default_segment_delivering_without_restoring_it(
 
     def record(payload: bytes, metadata: MessageMetadata) -> None:
         delivered.append(metadata.message_id)
+
+    # end function record
 
     setup.channel.default_segment().on_message(record)
 
@@ -111,6 +130,9 @@ async def test_keeps_the_default_segment_delivering_without_restoring_it(
     # Membership is what matters: the listener still receives.
     reconnect_socket.receive(message_frame("default", "id-1", "a"))
     assert delivered == ["id-1"]
+
+
+# end function test_keeps_the_default_segment_delivering_without_restoring_it
 
 
 async def test_absorbs_replayed_duplicates_across_reconnect_while_new_ids_flow(
@@ -132,6 +154,9 @@ async def test_absorbs_replayed_duplicates_across_reconnect_while_new_ids_flow(
     sockets[-1].receive(message_frame("chat", "id-3", "c"))
 
     assert delivered == ["id-1", "id-2", "id-3"]
+
+
+# end function test_absorbs_replayed_duplicates_across_reconnect_while_new_ids_flow
 
 
 async def test_restores_more_than_64_subscriptions_as_the_writer_drains(
@@ -161,6 +186,9 @@ async def test_restores_more_than_64_subscriptions_as_the_writer_drains(
     assert errors == []
 
 
+# end function test_restores_more_than_64_subscriptions_as_the_writer_drains
+
+
 async def test_restores_intent_again_on_a_second_recovery_without_duplicates(
     setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -177,3 +205,6 @@ async def test_restores_intent_again_on_a_second_recovery_without_duplicates(
     assert second_recovery_socket.sent_frames() == expected
     assert setup.channel.state == "connected"
     assert timers.count == 0
+
+
+# end function test_restores_intent_again_on_a_second_recovery_without_duplicates

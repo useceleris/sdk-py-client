@@ -22,6 +22,9 @@ def test_accepts_maximum_length_numeric_and_error_name_headers(newline: str) -> 
     assert (error.type, error.sub_type) == ("A" * 64, "B" * 64)
 
 
+# end function test_accepts_maximum_length_numeric_and_error_name_headers
+
+
 @pytest.mark.parametrize(
     ("header", "reason"),
     [
@@ -49,6 +52,9 @@ def test_preserves_bounded_header_failure(header: str, reason: str) -> None:
     assert (caught.value.field, caught.value.offset) == ("timestamp", 12)
 
 
+# end function test_preserves_bounded_header_failure
+
+
 def test_copies_binary_payloads_containing_newline_and_marker_bytes() -> None:
     pattern = b"\n\r@$*:+-"
     payload = (pattern * (65536 // len(pattern) + 1))[:65536]
@@ -56,6 +62,9 @@ def test_copies_binary_payloads_containing_newline_and_marker_bytes() -> None:
     message = decode_server_message(b"@SERVER_MSG\n:1\n$65536\n" + payload + b"\n")
 
     assert message == NoticeFrame(1, payload)
+
+
+# end function test_copies_binary_payloads_containing_newline_and_marker_bytes
 
 
 def test_rejects_a_long_malformed_header_without_searching_the_rest() -> None:
@@ -66,3 +75,6 @@ def test_rejects_a_long_malformed_header_without_searching_the_rest() -> None:
         "Line exceeds its 20-byte limit. Field: timestamp, byte offset 12."
     )
     assert (caught.value.field, caught.value.offset) == ("timestamp", 12)
+
+
+# end function test_rejects_a_long_malformed_header_without_searching_the_rest

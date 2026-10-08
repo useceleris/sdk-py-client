@@ -39,6 +39,9 @@ async def test_leaves_nothing_behind_after_50_connect_and_close_cycles(
     assert timers.count == 0
 
 
+# end function test_leaves_nothing_behind_after_50_connect_and_close_cycles
+
+
 async def test_sends_many_queued_publishes_in_order_once_the_writer_drains(
     monkeypatch: pytest.MonkeyPatch, sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -64,3 +67,6 @@ async def test_sends_many_queued_publishes_in_order_once_the_writer_drains(
     payloads = [frame.split("\n")[-2] for frame in socket.sent_frames()]
     assert payloads == [str(index) for index in range(1_000)]
     assert timers.count == 0
+
+
+# end function test_sends_many_queued_publishes_in_order_once_the_writer_drains

@@ -52,11 +52,17 @@ async def provide(request: CredentialRequest) -> Credentials:
     return TEST_CREDENTIALS
 
 
+# end function provide
+
+
 def refusal(**options: Any) -> str:
     with pytest.raises(ConfigurationError) as caught:
         create_client(**{"credential_provider": provide, **options})
 
     return str(caught.value)
+
+
+# end function refusal
 
 
 def record_ids(setup: ChannelSetup) -> list[str]:
@@ -65,16 +71,27 @@ def record_ids(setup: ChannelSetup) -> list[str]:
     def record(payload: bytes, metadata: MessageMetadata) -> None:
         delivered.append(metadata.message_id)
 
+    # end function record
+
     setup.channel.segment("chat").on_message(record)
     return delivered
+
+
+# end function record_ids
 
 
 def publish(setup: ChannelSetup, payload: bytes) -> "asyncio.Task[None]":
     return asyncio.ensure_future(setup.channel.default_segment().publish(payload))
 
 
+# end function publish
+
+
 def published_payloads(socket: FakeWebSocket) -> list[str]:
     return [frame.split("\n")[-2] for frame in socket.sent_frames()]
+
+
+# end function published_payloads
 
 
 async def assert_connect_times_out_at(
@@ -92,6 +109,9 @@ async def assert_connect_times_out_at(
         "Timeout",
         f"Connection attempt timed out after {timeout_ms} ms.",
     )
+
+
+# end function assert_connect_times_out_at
 
 
 async def assert_reconnects_time_out_at(
@@ -126,6 +146,9 @@ async def assert_reconnects_time_out_at(
     ]
 
 
+# end function assert_reconnects_time_out_at
+
+
 async def assert_presence_query_times_out_at(
     setup: ChannelSetup,
     sockets: list[FakeWebSocket],
@@ -149,6 +172,9 @@ async def assert_presence_query_times_out_at(
     sockets[-1].close.assert_not_called()
 
 
+# end function assert_presence_query_times_out_at
+
+
 class TestValidation:
     @pytest.mark.parametrize("option", TIMEOUT_OPTIONS + COUNT_OPTIONS)
     @pytest.mark.parametrize(
@@ -166,6 +192,8 @@ class TestValidation:
     ) -> None:
         assert refusal(**{option: value}) == f"Invalid client options. {option}: {rule}"
 
+    # end method test_refuses_a_number_option_naming_it_and_its_rule
+
     @pytest.mark.parametrize(
         "option",
         [
@@ -181,6 +209,8 @@ class TestValidation:
             f"Invalid client options. {option}: Input should be a valid integer."
         )
 
+    # end method test_refuses_none_for_every_number_option_but_the_reconnect_timeout
+
     @pytest.mark.parametrize("option", TIMEOUT_OPTIONS)
     def test_accepts_a_timeout_from_1_ms_to_15_minutes(self, option: str) -> None:
         for value in (1, 900_000):
@@ -191,6 +221,8 @@ class TestValidation:
             f"Invalid client options. {option}: Input should be less than or equal "
             "to 900000."
         )
+
+    # end method test_accepts_a_timeout_from_1_ms_to_15_minutes
 
     def test_accepts_maximum_reconnect_attempts_from_1_to_100(self) -> None:
         for value in (1, 100):
@@ -205,6 +237,8 @@ class TestValidation:
             "less than or equal to 100."
         )
 
+    # end method test_accepts_maximum_reconnect_attempts_from_1_to_100
+
     @pytest.mark.parametrize("provider", [None, "provider", 1])
     def test_refuses_a_credential_provider_that_is_not_callable(
         self, provider: object
@@ -212,6 +246,8 @@ class TestValidation:
         assert refusal(credential_provider=provider) == (
             "Invalid client options. credential_provider: Must be callable."
         )
+
+    # end method test_refuses_a_credential_provider_that_is_not_callable
 
     @pytest.mark.parametrize(
         ("base_url", "rule"),
@@ -229,12 +265,19 @@ class TestValidation:
             f"Invalid client options. base_url: {rule}"
         )
 
+    # end method test_refuses_a_base_url_of_the_wrong_type_or_empty
+
     @pytest.mark.parametrize("allow", ["yes", 1, None])
     def test_refuses_a_loopback_opt_in_that_is_not_a_bool(self, allow: object) -> None:
         assert refusal(allow_insecure_loopback=allow) == (
             "Invalid client options. allow_insecure_loopback: Input should be a "
             "valid boolean."
         )
+
+    # end method test_refuses_a_loopback_opt_in_that_is_not_a_bool
+
+
+# end class TestValidation
 
 
 class TestTimeouts:
@@ -249,6 +292,8 @@ class TestTimeouts:
         await assert_connect_times_out_at(setup, timers, 5_000)
         assert setup.channel.state == "failed"
         assert timers.count == 0
+
+    # end method test_times_out_a_connect_at_a_custom_connect_timeout
 
     @pytest.mark.parametrize(
         ("connect_timeout_ms", "reconnect_timeout_ms"),
@@ -276,6 +321,8 @@ class TestTimeouts:
             setup, sockets, timers, reconnect_timeout_ms
         )
 
+    # end method test_times_out_each_reconnect_attempt_at_the_reconnect_timeout
+
     async def test_reconnects_follow_a_custom_connect_timeout_when_none_is_set(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -285,6 +332,8 @@ class TestTimeouts:
         setup = create_client_channel(monkeypatch, timers, connect_timeout_ms=4_000)
 
         await assert_reconnects_time_out_at(setup, sockets, timers, 4_000)
+
+    # end method test_reconnects_follow_a_custom_connect_timeout_when_none_is_set
 
     async def test_times_out_a_presence_query_at_a_custom_timeout(
         self,
@@ -299,6 +348,8 @@ class TestTimeouts:
 
         await assert_presence_query_times_out_at(setup, sockets, timers, 2_000)
 
+    # end method test_times_out_a_presence_query_at_a_custom_timeout
+
     async def test_applies_the_default_timeouts(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -311,6 +362,8 @@ class TestTimeouts:
         await assert_reconnects_time_out_at(setup, sockets, timers, 15_000)
         await establish(setup, sockets)
         await assert_presence_query_times_out_at(setup, sockets, timers, 10_000)
+
+    # end method test_applies_the_default_timeouts
 
     async def test_times_out_at_exactly_15_minutes_at_the_largest_timeouts(
         self,
@@ -330,6 +383,11 @@ class TestTimeouts:
         await assert_reconnects_time_out_at(setup, sockets, timers, 900_000)
         await establish(setup, sockets)
         await assert_presence_query_times_out_at(setup, sockets, timers, 900_000)
+
+    # end method test_times_out_at_exactly_15_minutes_at_the_largest_timeouts
+
+
+# end class TestTimeouts
 
 
 class TestPublishQueueSize:
@@ -365,6 +423,8 @@ class TestPublishQueueSize:
             "@PUB\n$7\ndefault\n$11\ngenerated-1\n$5\nfirst\n"
         ]
 
+    # end method test_queues_one_publish_and_refuses_the_next_at_size_1
+
     async def test_queues_64_publishes_by_default(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -391,6 +451,11 @@ class TestPublishQueueSize:
         await asyncio.gather(*queued)
         assert published_payloads(socket) == [str(index) for index in range(64)]
 
+    # end method test_queues_64_publishes_by_default
+
+
+# end class TestPublishQueueSize
+
 
 class TestDeduplicationWindowSize:
     async def test_remembers_one_id_at_size_1(
@@ -414,6 +479,8 @@ class TestDeduplicationWindowSize:
         sockets[-1].receive(message_frame("chat", "A", "x"))
         assert delivered == ["A", "B", "A"]
 
+    # end method test_remembers_one_id_at_size_1
+
     async def test_remembers_1024_ids_by_default(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -433,6 +500,11 @@ class TestDeduplicationWindowSize:
         sockets[-1].receive(message_frame("chat", "id-0", "x"))
         assert delivered[-2:] == ["id-1024", "id-0"]
 
+    # end method test_remembers_1024_ids_by_default
+
+
+# end class TestDeduplicationWindowSize
+
 
 class TestLoopbackOptIn:
     def test_refuses_ws_to_localhost_unless_opted_in(self) -> None:
@@ -442,6 +514,8 @@ class TestLoopbackOptIn:
             == LOOPBACK_REFUSAL
         )
 
+    # end method test_refuses_ws_to_localhost_unless_opted_in
+
     @pytest.mark.parametrize("allow", [False, True])
     def test_always_refuses_ws_to_a_host_that_is_not_loopback(
         self, allow: bool
@@ -450,6 +524,8 @@ class TestLoopbackOptIn:
             refusal(base_url="ws://example.test", allow_insecure_loopback=allow)
             == LOOPBACK_REFUSAL
         )
+
+    # end method test_always_refuses_ws_to_a_host_that_is_not_loopback
 
     async def test_connects_over_ws_to_localhost_when_opted_in(
         self,
@@ -471,6 +547,11 @@ class TestLoopbackOptIn:
         assert sockets[0].url.startswith("ws://localhost:8080/channel/room-1?")
         await setup.channel.close()
 
+    # end method test_connects_over_ws_to_localhost_when_opted_in
+
+
+# end class TestLoopbackOptIn
+
 
 class ReconnectAttempts:
     """A channel built through create_client, connected and then dropped, so
@@ -491,6 +572,8 @@ class ReconnectAttempts:
         setup.channel.events().on_error(self.errors.append)
         setup.channel.events().on_state_change(self.states.append)
 
+    # end method __init__
+
     @classmethod
     async def connect_and_drop(
         cls,
@@ -506,6 +589,8 @@ class ReconnectAttempts:
         sockets[-1].disconnect()
         return attempts
 
+    # end method connect_and_drop
+
     def reconnect_requests(self) -> int:
         return sum(
             1
@@ -513,10 +598,14 @@ class ReconnectAttempts:
             if call.args[0].reason == "reconnect"
         )
 
+    # end method reconnect_requests
+
     async def start_scheduled_attempt(self) -> None:
         socket_count = len(self.sockets)
         await self.timers.advance(0)
         assert len(self.sockets) == socket_count + 1
+
+    # end method start_scheduled_attempt
 
     async def fail_scheduled_attempts(self, count: int) -> None:
         for _ in range(count):
@@ -524,10 +613,14 @@ class ReconnectAttempts:
             self.sockets[-1].fail()
             await flush()
 
+    # end method fail_scheduled_attempts
+
     async def succeed_scheduled_attempt(self) -> None:
         await self.start_scheduled_attempt()
         self.sockets[-1].open()
         await flush()
+
+    # end method succeed_scheduled_attempt
 
     def assert_failed_once(self) -> None:
         assert self.setup.channel.state == "failed"
@@ -536,6 +629,11 @@ class ReconnectAttempts:
         assert error.code == "Transport"
         assert self.states[-2:] == ["reconnecting", "failed"]
         assert self.timers.count == 0
+
+    # end method assert_failed_once
+
+
+# end class ReconnectAttempts
 
 
 class TestMaximumReconnectAttempts:
@@ -553,6 +651,8 @@ class TestMaximumReconnectAttempts:
 
         attempts.assert_failed_once()
         assert attempts.reconnect_requests() == 1
+
+    # end method test_fails_on_the_first_failed_attempt_with_a_maximum_of_1
 
     async def test_fails_after_exactly_3_failed_attempts_with_a_maximum_of_3(
         self,
@@ -572,6 +672,8 @@ class TestMaximumReconnectAttempts:
         attempts.assert_failed_once()
         assert attempts.reconnect_requests() == 3
 
+    # end method test_fails_after_exactly_3_failed_attempts_with_a_maximum_of_3
+
     async def test_fails_after_10_failed_attempts_by_default(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -588,6 +690,8 @@ class TestMaximumReconnectAttempts:
         await attempts.fail_scheduled_attempts(1)
         attempts.assert_failed_once()
         assert attempts.reconnect_requests() == 10
+
+    # end method test_fails_after_10_failed_attempts_by_default
 
     async def test_keeps_reconnecting_past_10_failed_attempts_with_a_maximum_of_100(
         self,
@@ -606,6 +710,8 @@ class TestMaximumReconnectAttempts:
         await attempts.start_scheduled_attempt()
         assert attempts.reconnect_requests() == 11
         await attempts.setup.channel.close()
+
+    # end method test_keeps_reconnecting_past_10_failed_attempts_with_a_maximum_of_100
 
     async def test_keeps_spent_attempts_for_an_outage_within_sixty_seconds_of_recovery(
         self,
@@ -627,6 +733,8 @@ class TestMaximumReconnectAttempts:
 
         attempts.assert_failed_once()
         assert attempts.reconnect_requests() == 3
+
+    # end method test_keeps_spent_attempts_for_an_outage_within_sixty_seconds_of_recovery
 
     async def test_allows_the_full_maximum_again_after_sixty_seconds_connected(
         self,
@@ -650,3 +758,8 @@ class TestMaximumReconnectAttempts:
         await attempts.fail_scheduled_attempts(1)
         attempts.assert_failed_once()
         assert attempts.reconnect_requests() == 4
+
+    # end method test_allows_the_full_maximum_again_after_sixty_seconds_connected
+
+
+# end class TestMaximumReconnectAttempts

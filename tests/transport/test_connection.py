@@ -38,6 +38,9 @@ class Callbacks:
     on_error: Mock = field(default_factory=Mock)
 
 
+# end class Callbacks
+
+
 def attempt(
     callbacks: Callbacks,
     timers: FakeTimers,
@@ -55,6 +58,9 @@ def attempt(
             **options,
         )
     )
+
+
+# end function attempt
 
 
 class TestConnectionAttempt:
@@ -87,6 +93,8 @@ class TestConnectionAttempt:
         await second
         assert callbacks.credential_provider.await_count == 2
 
+    # end method test_awaits_open_and_passes_fresh_initial_credentials
+
     async def test_passes_complete_reconnect_context(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -117,6 +125,8 @@ class TestConnectionAttempt:
             )
         )
 
+    # end method test_passes_complete_reconnect_context
+
     @pytest.mark.parametrize(
         "value",
         [
@@ -138,6 +148,8 @@ class TestConnectionAttempt:
 
         assert sockets == []
 
+    # end method test_rejects_invalid_credentials
+
     async def test_names_the_failed_credential_field_without_its_value(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -153,6 +165,8 @@ class TestConnectionAttempt:
         )
         assert "synthetic-secret" not in repr(error)
 
+    # end method test_names_the_failed_credential_field_without_its_value
+
     @pytest.mark.parametrize("asynchronous", [False, True])
     async def test_sanitizes_provider_failure(
         self, sockets: list[FakeWebSocket], timers: FakeTimers, asynchronous: bool
@@ -160,8 +174,12 @@ class TestConnectionAttempt:
         def raise_secret(request: CredentialRequest) -> Credentials:
             raise ConfigurationError("synthetic-secret") from Exception("synthetic")
 
+        # end function raise_secret
+
         async def raise_secret_later(request: CredentialRequest) -> Credentials:
             return raise_secret(request)
+
+        # end function raise_secret_later
 
         callbacks = Callbacks()
         provider = raise_secret_later if asynchronous else raise_secret
@@ -185,6 +203,8 @@ class TestConnectionAttempt:
         assert error.__cause__ is None
         assert error.__context__ is None
 
+    # end method test_sanitizes_provider_failure
+
     @pytest.mark.parametrize("event", ["error", "close"])
     async def test_rejects_failure_before_open_and_ignores_later_events(
         self, sockets: list[FakeWebSocket], timers: FakeTimers, event: str
@@ -202,11 +222,15 @@ class TestConnectionAttempt:
         assert error.code == "Transport"
         sockets[0].open()
 
+    # end method test_rejects_failure_before_open_and_ignores_later_events
+
     async def test_converts_websocket_construction_failure_safely(
         self, monkeypatch: pytest.MonkeyPatch, timers: FakeTimers
     ) -> None:
         def refuse(url: str) -> None:
             raise RuntimeError("synthetic-secret")
+
+        # end function refuse
 
         monkeypatch.setattr(_connection, "WebSocket", refuse)
 
@@ -216,6 +240,8 @@ class TestConnectionAttempt:
         assert error.code == "Transport"
         assert "synthetic-secret" not in repr(error)
         assert error.__context__ is None
+
+    # end method test_converts_websocket_construction_failure_safely
 
     @pytest.mark.parametrize("reason", ["cancellation", "caller", "timeout"])
     async def test_cancels_the_provider_and_ignores_late_credentials(
@@ -231,6 +257,8 @@ class TestConnectionAttempt:
                 provider_cancelled.set()
 
             return CREDENTIALS
+
+        # end function stubborn_provider
 
         cancellation = asyncio.get_running_loop().create_future()
         callbacks = Callbacks()
@@ -267,12 +295,16 @@ class TestConnectionAttempt:
         assert sockets == []
         assert timers.count == 0
 
+    # end method test_cancels_the_provider_and_ignores_late_credentials
+
     async def test_uses_one_deadline_for_credentials_and_handshake(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
         async def slow_provider(request: CredentialRequest) -> Credentials:
             await timers.sleep(10_000)
             return CREDENTIALS
+
+        # end function slow_provider
 
         callbacks = Callbacks(credential_provider=AsyncMock(side_effect=slow_provider))
         pending = attempt(callbacks, timers)
@@ -288,12 +320,16 @@ class TestConnectionAttempt:
         sockets[0].close.assert_called_once()
         assert timers.count == 0
 
+    # end method test_uses_one_deadline_for_credentials_and_handshake
+
     async def test_honors_a_custom_timeout(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
         async def never(request: CredentialRequest) -> Credentials:
             await asyncio.get_running_loop().create_future()
             raise AssertionError("unreachable")
+
+        # end function never
 
         callbacks = Callbacks(credential_provider=AsyncMock(side_effect=never))
         pending = attempt(callbacks, timers, timeout_ms=5_000)
@@ -303,6 +339,8 @@ class TestConnectionAttempt:
         assert isinstance(error, CelerisConnectionError)
         assert error.code == "Timeout"
         assert timers.count == 0
+
+    # end method test_honors_a_custom_timeout
 
     async def test_pre_cancellation_skips_the_provider(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -317,6 +355,8 @@ class TestConnectionAttempt:
         assert error.code == "Cancelled"
         callbacks.credential_provider.assert_not_called()
         assert timers.count == 0
+
+    # end method test_pre_cancellation_skips_the_provider
 
     async def test_cancels_during_handshake_and_removes_the_deadline(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -334,6 +374,8 @@ class TestConnectionAttempt:
         sockets[0].open()
         assert timers.count == 0
 
+    # end method test_cancels_during_handshake_and_removes_the_deadline
+
     async def test_rejects_options_that_are_not_callable(
         self, timers: FakeTimers
     ) -> None:
@@ -343,6 +385,11 @@ class TestConnectionAttempt:
             await open_connection(
                 CONFIGURATION, credential_provider=untyped, on_message=untyped
             )
+
+    # end method test_rejects_options_that_are_not_callable
+
+
+# end class TestConnectionAttempt
 
 
 class TestOpenConnection:
@@ -356,6 +403,8 @@ class TestOpenConnection:
         sockets[-1].open()
 
         return await pending, callbacks, sockets[-1]
+
+    # end method connected
 
     async def test_decodes_binary_messages_in_arrival_order(
         self,
@@ -373,6 +422,8 @@ class TestOpenConnection:
             (NoticeFrame(2, b"b"),),
         ]
 
+    # end method test_decodes_binary_messages_in_arrival_order
+
     @pytest.mark.parametrize("data", ["text", bytearray(b"x"), memoryview(b"x")])
     async def test_drops_unsupported_message_data_without_closing(
         self,
@@ -389,6 +440,8 @@ class TestOpenConnection:
         # DECODE-01: the frame is dropped, the connection is not.
         socket.close.assert_not_called()
 
+    # end method test_drops_unsupported_message_data_without_closing
+
     async def test_keeps_delivering_messages_after_an_undecodable_frame(
         self, connected: tuple[ConnectionHandle, Callbacks, FakeWebSocket]
     ) -> None:
@@ -401,6 +454,8 @@ class TestOpenConnection:
         assert isinstance(callbacks.on_error.call_args.args[0], ProtocolError)
         callbacks.on_message.assert_called_once_with(NoticeFrame(1, b"hi"))
         socket.close.assert_not_called()
+
+    # end method test_keeps_delivering_messages_after_an_undecodable_frame
 
     async def test_delivers_a_received_message_of_any_size(
         self, connected: tuple[ConnectionHandle, Callbacks, FakeWebSocket]
@@ -418,6 +473,8 @@ class TestOpenConnection:
 
         callbacks.on_error.assert_not_called()
         callbacks.on_message.assert_called_once()
+
+    # end method test_delivers_a_received_message_of_any_size
 
     @pytest.mark.parametrize(
         "failure",
@@ -444,6 +501,8 @@ class TestOpenConnection:
         assert not hasattr(error, "field")
         assert "synthetic" not in repr(error)
         socket.close.assert_called_once()
+
+    # end method test_contains_message_and_error_callback_failures
 
     async def test_sends_bytes_within_exact_limits(
         self, connected: tuple[ConnectionHandle, Callbacks, FakeWebSocket]
@@ -477,6 +536,8 @@ class TestOpenConnection:
             "2 MiB. Retry once the buffer drains."
         )
 
+    # end method test_sends_bytes_within_exact_limits
+
     async def test_sanitizes_socket_send_failures(
         self, connected: tuple[ConnectionHandle, Callbacks, FakeWebSocket]
     ) -> None:
@@ -492,6 +553,8 @@ class TestOpenConnection:
             "or may not have been sent."
         )
         assert caught.value.__context__ is None
+
+    # end method test_sanitizes_socket_send_failures
 
     async def test_closes_once_and_reports_the_close_after_an_explicit_close(
         self, connected: tuple[ConnectionHandle, Callbacks, FakeWebSocket]
@@ -512,6 +575,8 @@ class TestOpenConnection:
         ):
             handle.send(b"")
 
+    # end method test_closes_once_and_reports_the_close_after_an_explicit_close
+
     async def test_reports_an_unexpected_close_once_and_contains_its_failure(
         self, connected: tuple[ConnectionHandle, Callbacks, FakeWebSocket]
     ) -> None:
@@ -526,6 +591,11 @@ class TestOpenConnection:
 
         with pytest.raises(CelerisConnectionError, match=r"^Connection is not open;"):
             handle.send(b"")
+
+    # end method test_reports_an_unexpected_close_once_and_contains_its_failure
+
+
+# end class TestOpenConnection
 
 
 async def test_closes_a_socket_that_opens_as_the_caller_is_cancelled(
@@ -544,6 +614,9 @@ async def test_closes_a_socket_that_opens_as_the_caller_is_cancelled(
     assert timers.count == 0
 
 
+# end function test_closes_a_socket_that_opens_as_the_caller_is_cancelled
+
+
 async def test_closes_a_socket_that_opened_before_the_cancelled_caller_resumed(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -557,3 +630,6 @@ async def test_closes_a_socket_that_opened_before_the_cancelled_caller_resumed(
 
     assert isinstance(await failure_of(pending), asyncio.CancelledError)
     sockets[0].close.assert_called_once()
+
+
+# end function test_closes_a_socket_that_opened_before_the_cancelled_caller_resumed

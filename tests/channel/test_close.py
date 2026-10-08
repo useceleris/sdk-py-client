@@ -32,6 +32,9 @@ async def test_is_idempotent_and_every_call_waits_for_the_same_close(
     assert states == ["closing", "closed"]
 
 
+# end function test_is_idempotent_and_every_call_waits_for_the_same_close
+
+
 async def test_closes_a_connected_channel_on_the_sockets_close(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -44,6 +47,9 @@ async def test_closes_a_connected_channel_on_the_sockets_close(
     assert states == ["closing", "closed"]
     sockets[0].close.assert_called_once()
     assert timers.count == 0
+
+
+# end function test_closes_a_connected_channel_on_the_sockets_close
 
 
 async def test_applies_the_five_second_budget_when_the_close_never_arrives(
@@ -65,6 +71,9 @@ async def test_applies_the_five_second_budget_when_the_close_never_arrives(
     assert timers.count == 0
 
 
+# end function test_applies_the_five_second_budget_when_the_close_never_arrives
+
+
 async def test_aborts_a_pending_attempt_and_ignores_late_credentials(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -79,6 +88,8 @@ async def test_aborts_a_pending_attempt_and_ignores_late_credentials(
             provider_cancelled.set()
 
         return TEST_CREDENTIALS
+
+    # end function stubborn
 
     setup.credential_provider.side_effect = stubborn
     pending = asyncio.ensure_future(setup.channel.connect())
@@ -96,6 +107,9 @@ async def test_aborts_a_pending_attempt_and_ignores_late_credentials(
     assert timers.count == 0
 
 
+# end function test_aborts_a_pending_attempt_and_ignores_late_credentials
+
+
 async def test_clears_the_retry_timer_when_closed_while_reconnecting(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -108,6 +122,9 @@ async def test_clears_the_retry_timer_when_closed_while_reconnecting(
     await channel.close()
     assert channel.state == "closed"
     assert timers.count == 0
+
+
+# end function test_clears_the_retry_timer_when_closed_while_reconnecting
 
 
 async def test_ignores_stale_socket_events_after_close(
@@ -132,6 +149,9 @@ async def test_ignores_stale_socket_events_after_close(
     assert timers.count == 0
 
 
+# end function test_ignores_stale_socket_events_after_close
+
+
 async def test_closes_from_every_non_terminal_state(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -153,6 +173,9 @@ async def test_closes_from_every_non_terminal_state(
     assert timers.count == 0
 
 
+# end function test_closes_from_every_non_terminal_state
+
+
 async def test_a_cancelled_close_still_completes(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -168,6 +191,9 @@ async def test_a_cancelled_close_still_completes(
     await timers.advance(5_000)
     await second
     assert channel.state == "closed"
+
+
+# end function test_a_cancelled_close_still_completes
 
 
 async def test_refuses_a_publish_while_closing_and_writes_nothing(
@@ -191,3 +217,6 @@ async def test_refuses_a_publish_while_closing_and_writes_nothing(
 
     await timers.advance(5_000)
     await closing
+
+
+# end function test_refuses_a_publish_while_closing_and_writes_nothing

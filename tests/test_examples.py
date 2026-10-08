@@ -29,6 +29,9 @@ def snippets(document: str) -> list[str]:
     return re.findall(r"```python\n(.*?)```", text, flags=re.DOTALL)
 
 
+# end function snippets
+
+
 def test_documented_snippets_typecheck_against_the_public_surface(
     tmp_path: Path,
 ) -> None:
@@ -61,3 +64,6 @@ def test_documented_snippets_typecheck_against_the_public_surface(
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# end function test_documented_snippets_typecheck_against_the_public_surface

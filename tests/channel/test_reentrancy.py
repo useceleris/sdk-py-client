@@ -29,6 +29,9 @@ async def setup(sockets: list[FakeWebSocket], timers: FakeTimers) -> ChannelSetu
     return await establish(create_test_channel(timers), sockets)
 
 
+# end function setup
+
+
 async def test_sends_a_publish_from_a_message_listener_after_the_dispatch(
     setup: ChannelSetup, sockets: list[FakeWebSocket]
 ) -> None:
@@ -40,8 +43,12 @@ async def test_sends_a_publish_from_a_message_listener_after_the_dispatch(
             asyncio.ensure_future(setup.channel.segment("chat").publish(b"reply"))
         )
 
+    # end function reply
+
     def count_sent(payload: bytes, metadata: MessageMetadata) -> None:
         sent_during_dispatch.append(sockets[-1].send.call_count)
+
+    # end function count_sent
 
     setup.channel.segment("chat").on_message(reply)
     setup.channel.segment("chat").on_message(count_sent)
@@ -52,6 +59,9 @@ async def test_sends_a_publish_from_a_message_listener_after_the_dispatch(
     assert sockets[-1].sent_frames() == [
         "@PUB\n$4\nchat\n$11\ngenerated-1\n$5\nreply\n"
     ]
+
+
+# end function test_sends_a_publish_from_a_message_listener_after_the_dispatch
 
 
 async def test_subscribes_and_cancels_from_a_listener(
@@ -65,6 +75,8 @@ async def test_subscribes_and_cancels_from_a_listener(
     def switch(payload: bytes, metadata: MessageMetadata) -> None:
         setup.channel.segment("news").subscribe()
         sports.cancel()
+
+    # end function switch
 
     setup.channel.segment("chat").on_message(switch)
     setup.channel.segment("chat").on_message(
@@ -82,6 +94,9 @@ async def test_subscribes_and_cancels_from_a_listener(
     ]
 
 
+# end function test_subscribes_and_cancels_from_a_listener
+
+
 async def test_closes_from_a_listener_without_raising(
     setup: ChannelSetup, sockets: list[FakeWebSocket]
 ) -> None:
@@ -96,6 +111,8 @@ async def test_closes_from_a_listener_without_raising(
         if not closes:
             closes.append(asyncio.ensure_future(setup.channel.close()))
 
+    # end function close
+
     setup.channel.segment("chat").on_message(close)
     sockets[-1].receive(message_frame("chat", "id-1", "x"))
     await asyncio.gather(*closes)
@@ -104,6 +121,9 @@ async def test_closes_from_a_listener_without_raising(
     assert setup.channel.state == "closed"
     assert delivered == ["id-1"]
     assert errors == []
+
+
+# end function test_closes_from_a_listener_without_raising
 
 
 async def test_connects_again_from_a_failed_state_listener(
@@ -117,6 +137,8 @@ async def test_connects_again_from_a_failed_state_listener(
         if state == "failed" and not retries:
             retries.append(asyncio.ensure_future(setup.channel.connect()))
 
+    # end function retry
+
     setup.channel.events().on_state_change(retry)
     error = await failure_of(asyncio.ensure_future(setup.channel.connect()))
     assert isinstance(error, CelerisConnectionError)
@@ -126,6 +148,9 @@ async def test_connects_again_from_a_failed_state_listener(
     sockets[-1].open()
     await retries[0]
     assert setup.channel.state == "connected"
+
+
+# end function test_connects_again_from_a_failed_state_listener
 
 
 async def test_settles_a_presence_query_from_a_listener_when_its_response_arrives(
@@ -140,6 +165,8 @@ async def test_settles_a_presence_query_from_a_listener_when_its_response_arrive
             )
         )
 
+    # end function ask
+
     setup.channel.segment("chat").on_message(ask)
     sockets[-1].receive(message_frame("chat", "id-1", "x"))
     await flush()
@@ -147,3 +174,6 @@ async def test_settles_a_presence_query_from_a_listener_when_its_response_arrive
 
     sockets[-1].receive(presence_response_frame(request_id="1", total=3))
     assert (await queries[0]).total == 3
+
+
+# end function test_settles_a_presence_query_from_a_listener_when_its_response_arrives

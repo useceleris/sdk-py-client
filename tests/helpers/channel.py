@@ -25,11 +25,17 @@ class ChannelClocks:
     random_value: float = 0
 
 
+# end class ChannelClocks
+
+
 @dataclass
 class ChannelSetup:
     channel: Channel
     credential_provider: AsyncMock
     clocks: ChannelClocks
+
+
+# end class ChannelSetup
 
 
 def create_test_channel(timers: FakeTimers, **overrides: Any) -> ChannelSetup:
@@ -62,6 +68,9 @@ def create_test_channel(timers: FakeTimers, **overrides: Any) -> ChannelSetup:
     )
 
 
+# end function create_test_channel
+
+
 def create_client_channel(
     monkeypatch: pytest.MonkeyPatch, timers: FakeTimers, **options: Any
 ) -> ChannelSetup:
@@ -92,6 +101,9 @@ def create_client_channel(
     return ChannelSetup(client.channel("room-1"), credential_provider, clocks)
 
 
+# end function create_client_channel
+
+
 async def establish(setup: ChannelSetup, sockets: list[FakeWebSocket]) -> ChannelSetup:
     pending = asyncio.ensure_future(setup.channel.connect())
     await flush()
@@ -101,9 +113,15 @@ async def establish(setup: ChannelSetup, sockets: list[FakeWebSocket]) -> Channe
     return setup
 
 
+# end function establish
+
+
 def once(*first: object, then: object = TEST_CREDENTIALS) -> Iterator[object]:
     """A mock side effect: these outcomes in turn, then the same one forever."""
     return itertools.chain(first, itertools.repeat(then))
+
+
+# end function once
 
 
 def message_frame(segment_id: str, message_id: str | None, body: str) -> bytes:
@@ -117,6 +135,9 @@ def message_frame(segment_id: str, message_id: str | None, body: str) -> bytes:
         f"@MSG\n$4\nuser\n${len(segment_id.encode())}\n{segment_id}\n"
         f"{identifier}:1\n${len(body.encode())}\n{body}\n"
     ).encode()
+
+
+# end function message_frame
 
 
 def presence_response_frame(
@@ -142,6 +163,9 @@ def presence_response_frame(
     ).encode()
 
 
+# end function presence_response_frame
+
+
 # Laid out like the server's ErrorMessage.
 def error_frame(
     type: str,
@@ -155,3 +179,6 @@ def error_frame(
         f"-Err\n+{type}\n{sub_type_field}${len(message.encode())}\n{message}\n"
         + resource
     ).encode()
+
+
+# end function error_frame

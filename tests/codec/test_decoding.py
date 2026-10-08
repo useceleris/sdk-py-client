@@ -18,10 +18,16 @@ def test_decodes_golden_vector(data: bytes, expected: ServerMessage) -> None:
     assert decode_server_message(data) == expected
 
 
+# end function test_decodes_golden_vector
+
+
 @pytest.mark.parametrize("data", MALFORMED_VECTORS)
 def test_rejects_malformed_message(data: bytes) -> None:
     with pytest.raises(ProtocolError):
         decode_server_message(data)
+
+
+# end function test_rejects_malformed_message
 
 
 def test_rejects_every_truncation_of_a_fixed_peer_message() -> None:
@@ -30,6 +36,9 @@ def test_rejects_every_truncation_of_a_fixed_peer_message() -> None:
     for length in range(len(data)):
         with pytest.raises(ProtocolError):
             decode_server_message(data[:length])
+
+
+# end function test_rejects_every_truncation_of_a_fixed_peer_message
 
 
 def test_bounds_nesting_and_counts_fields_as_fragments() -> None:
@@ -42,6 +51,9 @@ def test_bounds_nesting_and_counts_fields_as_fragments() -> None:
 
     with pytest.raises(ProtocolError):
         decode_server_message(b"*1366\n" + b"@SERVER_MSG\n:1\n$0\n\n" * 1366)
+
+
+# end function test_bounds_nesting_and_counts_fields_as_fragments
 
 
 def test_decodes_messages_larger_than_one_mebibyte() -> None:
@@ -59,6 +71,9 @@ def test_decodes_messages_larger_than_one_mebibyte() -> None:
     assert isinstance(message, MessageFrame)
     assert message.segment_id == "chat"
     assert len(message.payload) == payload_length
+
+
+# end function test_decodes_messages_larger_than_one_mebibyte
 
 
 def test_rejects_non_byte_input_with_a_safe_error() -> None:
@@ -81,6 +96,9 @@ def test_rejects_non_byte_input_with_a_safe_error() -> None:
     assert "synthetic-secret" not in repr(error)
 
 
+# end function test_rejects_non_byte_input_with_a_safe_error
+
+
 def test_handles_deterministic_mutated_inputs_without_native_exceptions() -> None:
     seed = 0xCE1E
 
@@ -91,3 +109,6 @@ def test_handles_deterministic_mutated_inputs_without_native_exceptions() -> Non
 
         with contextlib.suppress(ProtocolError):
             decode_server_message(bytes(data))
+
+
+# end function test_handles_deterministic_mutated_inputs_without_native_exceptions

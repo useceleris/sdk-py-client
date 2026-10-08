@@ -16,6 +16,11 @@ class FakeTimer:
         if self in self.owner.pending:
             self.owner.pending.remove(self)
 
+    # end method cancel
+
+
+# end class FakeTimer
+
 
 class FakeTimers:
     """Virtual time for the package's timers. advance() fires each due timer
@@ -26,15 +31,21 @@ class FakeTimers:
         self.pending: list[FakeTimer] = []
         self._sequence = 0
 
+    # end method __init__
+
     def call_later(self, delay_ms: float, callback: Callable[[], None]) -> FakeTimer:
         self._sequence += 1
         timer = FakeTimer(self.now + max(delay_ms, 0), self._sequence, callback, self)
         self.pending.append(timer)
         return timer
 
+    # end method call_later
+
     @property
     def count(self) -> int:
         return len(self.pending)
+
+    # end method count
 
     async def advance(self, milliseconds: float) -> None:
         target = self.now + milliseconds
@@ -54,8 +65,15 @@ class FakeTimers:
         self.now = target
         await flush()
 
+    # end method advance
+
     async def sleep(self, milliseconds: float) -> None:
         """For test doubles that need to take virtual time."""
         woken = asyncio.get_running_loop().create_future()
         self.call_later(milliseconds, lambda: woken.set_result(None))
         await woken
+
+    # end method sleep
+
+
+# end class FakeTimers

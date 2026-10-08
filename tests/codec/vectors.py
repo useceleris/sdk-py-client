@@ -24,10 +24,16 @@ class EncodingVector(NamedTuple):
     expected: bytes
 
 
+# end class EncodingVector
+
+
 class DecodingVector(NamedTuple):
     name: str
     data: bytes
     expected: ServerMessage
+
+
+# end class DecodingVector
 
 
 ENCODING_VECTORS = [

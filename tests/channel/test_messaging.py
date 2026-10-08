@@ -34,11 +34,19 @@ async def setup(sockets: list[FakeWebSocket], timers: FakeTimers) -> ChannelSetu
     return await establish(create_test_channel(timers), sockets)
 
 
+# end function setup
+
+
 def bump_buffer(socket: FakeWebSocket) -> None:
     def bump(data: bytes) -> None:
         socket.buffered_amount += 1
 
+    # end function bump
+
     socket.send.side_effect = bump
+
+
+# end function bump_buffer
 
 
 def record_ids(segment: Segment) -> list[str]:
@@ -47,12 +55,20 @@ def record_ids(segment: Segment) -> list[str]:
     def record(payload: bytes, metadata: MessageMetadata) -> None:
         delivered.append(metadata.message_id)
 
+    # end function record
+
     segment.on_message(record)
     return delivered
 
 
+# end function record_ids
+
+
 def publish(segment: Segment, payload: bytes, **options: Any) -> "asyncio.Task[None]":
     return asyncio.ensure_future(segment.publish(payload, **options))
+
+
+# end function publish
 
 
 class TestSegmentProxies:
@@ -68,12 +84,16 @@ class TestSegmentProxies:
         assert setup.channel.default_segment().segment_id == "default"
         sockets[-1].send.assert_not_called()
 
+    # end method test_creates_side_effect_free_stateless_proxies
+
     @pytest.mark.parametrize("identifier", ["", "bad\nid", "bad\rid", "\ud800", None])
     async def test_rejects_invalid_segment_identifiers(
         self, timers: FakeTimers, identifier: Any
     ) -> None:
         with pytest.raises(ConfigurationError, match=r"^Invalid segment ID\. "):
             create_test_channel(timers).channel.segment(identifier)
+
+    # end method test_rejects_invalid_segment_identifiers
 
     async def test_shares_one_interest_count_across_instances(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
@@ -89,6 +109,8 @@ class TestSegmentProxies:
         second.cancel()
         assert sockets[-1].sent_frames() == ["@SUB\n$4\nchat\n", "@UNSUB\n$4\nchat\n"]
 
+    # end method test_shares_one_interest_count_across_instances
+
     async def test_multiplexes_segments_over_one_socket_another_channel_opens_another(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -103,12 +125,19 @@ class TestSegmentProxies:
         )
         assert len(sockets) == 2
 
+    # end method test_multiplexes_segments_over_one_socket_another_channel_opens_another
+
     async def test_never_sends_sub_or_unsub_for_the_default_segment(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
         setup.channel.default_segment().subscribe().cancel()
 
         sockets[-1].send.assert_not_called()
+
+    # end method test_never_sends_sub_or_unsub_for_the_default_segment
+
+
+# end class TestSegmentProxies
 
 
 class TestPublish:
@@ -123,6 +152,8 @@ class TestPublish:
             "@PUB\n$4\nchat\n$3\nm-1\n$2\nyo\n",
         ]
 
+    # end method test_returns_on_local_acceptance_with_exact_bytes_and_a_generated_id
+
     async def test_rejects_a_publish_with_not_connected_outside_recovery(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -136,6 +167,8 @@ class TestPublish:
                 "NotConnected",
                 f"Channel is not connected; it is {state}.",
             )
+
+        # end function assert_refused
 
         await assert_refused("idle")
 
@@ -156,6 +189,8 @@ class TestPublish:
 
         for socket in sockets:
             socket.send.assert_not_called()
+
+    # end method test_rejects_a_publish_with_not_connected_outside_recovery
 
     async def test_rejects_invalid_options_before_writing(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
@@ -180,6 +215,8 @@ class TestPublish:
         assert sockets[-1].sent_frames() == [
             "@PUB\n$7\ndefault\n$11\ngenerated-3\n$0\n\n"
         ]
+
+    # end method test_rejects_invalid_options_before_writing
 
     async def test_queues_publishes_behind_a_full_writer_and_sends_them_on_drain(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -210,6 +247,8 @@ class TestPublish:
         assert socket.send.call_count == 128
         assert setup.channel.state == "connected"
 
+    # end method test_queues_publishes_behind_a_full_writer_and_sends_them_on_drain
+
     async def test_maps_a_socket_send_failure_to_delivery_unknown(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -224,6 +263,11 @@ class TestPublish:
         assert setup.channel.state == "connected"
         assert errors == []
 
+    # end method test_maps_a_socket_send_failure_to_delivery_unknown
+
+
+# end class TestPublish
+
 
 class TestSubscriptionsAndFlush:
     async def test_flushes_registered_interests_on_connect_in_order(
@@ -237,6 +281,8 @@ class TestSubscriptionsAndFlush:
         await establish(setup, sockets)
 
         assert sockets[-1].sent_frames() == ["@SUB\n$4\nbeta\n", "@SUB\n$5\nalpha\n"]
+
+    # end method test_flushes_registered_interests_on_connect_in_order
 
     async def test_reflushes_interests_after_reconnect_and_skips_cancelled_ones(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -254,6 +300,8 @@ class TestSubscriptionsAndFlush:
 
         assert setup.channel.state == "connected"
         assert sockets[-1].sent_frames() == ["@SUB\n$4\nchat\n"]
+
+    # end method test_reflushes_interests_after_reconnect_and_skips_cancelled_ones
 
     async def test_sends_a_subscription_queued_behind_a_full_writer_first(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -282,6 +330,8 @@ class TestSubscriptionsAndFlush:
         assert setup.channel.state == "connected"
         assert errors == []
 
+    # end method test_sends_a_subscription_queued_behind_a_full_writer_first
+
     async def test_restores_more_than_64_subscriptions_on_connect_as_it_drains(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -306,6 +356,8 @@ class TestSubscriptionsAndFlush:
         assert socket.send.call_count == 65
         assert socket.sent_frames()[-1] == "@SUB\n$10\nsegment-64\n"
 
+    # end method test_restores_more_than_64_subscriptions_on_connect_as_it_drains
+
     async def test_carries_nothing_from_a_failed_connect_into_the_next_one(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -328,6 +380,8 @@ class TestSubscriptionsAndFlush:
 
         assert sockets[-1].sent_frames() == ["@SUB\n$5\nlobby\n"]
 
+    # end method test_carries_nothing_from_a_failed_connect_into_the_next_one
+
     async def test_rejects_subscribe_on_a_closed_channel(
         self, timers: FakeTimers
     ) -> None:
@@ -339,6 +393,11 @@ class TestSubscriptionsAndFlush:
             match=r"^Channel is closed; create a new one with client\.channel\(\)\.$",
         ):
             channel.segment("chat").subscribe()
+
+    # end method test_rejects_subscribe_on_a_closed_channel
+
+
+# end class TestSubscriptionsAndFlush
 
 
 class TestDeliveryAndDedup:
@@ -355,6 +414,8 @@ class TestDeliveryAndDedup:
         assert chat == ["id-1"]
         assert lobby == ["id-2"]
 
+    # end method test_routes_messages_to_their_segments_listeners_only
+
     async def test_delivers_to_every_listener_and_preserves_fields(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -362,6 +423,8 @@ class TestDeliveryAndDedup:
 
         def record(payload: bytes, metadata: MessageMetadata) -> None:
             seen.append((payload, metadata))
+
+        # end function record
 
         setup.channel.segment("chat").on_message(record)
         setup.channel.segment("chat").on_message(record)
@@ -379,6 +442,8 @@ class TestDeliveryAndDedup:
             ),
         )
 
+    # end method test_delivers_to_every_listener_and_preserves_fields
+
     async def test_deduplicates_by_id_recording_ids_even_without_listeners(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -389,6 +454,8 @@ class TestDeliveryAndDedup:
         sockets[-1].receive(message_frame("chat", "id-2", "hi"))
 
         assert delivered == ["id-2"]
+
+    # end method test_deduplicates_by_id_recording_ids_even_without_listeners
 
     async def test_evicts_the_oldest_id_beyond_the_window_size(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
@@ -404,6 +471,8 @@ class TestDeliveryAndDedup:
 
         assert len(delivered) == 1026
         assert delivered[-1] == "id-0"
+
+    # end method test_evicts_the_oldest_id_beyond_the_window_size
 
     async def test_keeps_the_window_across_reconnect_and_clears_it_on_connect(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -425,6 +494,8 @@ class TestDeliveryAndDedup:
         redelivered = record_ids(fresh.channel.segment("chat"))
         sockets[-1].receive(message_frame("chat", "id-1", "x"))
         assert redelivered == ["id-1"]
+
+    # end method test_keeps_the_window_across_reconnect_and_clears_it_on_connect
 
     async def test_drops_a_null_id_message_without_dropping_the_connection(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -448,6 +519,8 @@ class TestDeliveryAndDedup:
         sockets[-1].close.assert_not_called()
         assert timers.count == 0
 
+    # end method test_drops_a_null_id_message_without_dropping_the_connection
+
     async def test_skips_an_internal_node_command_without_reporting_it(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -463,6 +536,8 @@ class TestDeliveryAndDedup:
         assert errors == []
         assert states == []
         assert delivered == ["id-1"]
+
+    # end method test_skips_an_internal_node_command_without_reporting_it
 
     async def test_reports_error_frames_while_staying_connected(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
@@ -489,6 +564,8 @@ class TestDeliveryAndDedup:
         assert setup.channel.state == "connected"
         assert delivered == ["id-1"]
 
+    # end method test_reports_error_frames_while_staying_connected
+
     async def test_reports_a_permission_denial_with_its_command_and_segment(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -514,6 +591,8 @@ class TestDeliveryAndDedup:
         )
         assert setup.channel.state == "connected"
         assert delivered == ["id-1"]
+
+    # end method test_reports_a_permission_denial_with_its_command_and_segment
 
     @pytest.mark.parametrize(
         "type",
@@ -547,6 +626,8 @@ class TestDeliveryAndDedup:
         )
         assert setup.channel.state == "connected"
 
+    # end method test_surfaces_an_error_frame_with_every_field
+
     async def test_surfaces_the_servers_message_size_rejection_exactly(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -562,6 +643,8 @@ class TestDeliveryAndDedup:
         assert isinstance(errors[0], ServerError)
         assert (errors[0].type, str(errors[0])) == ("MessageSizeLimitError", message)
 
+    # end method test_surfaces_the_servers_message_size_rejection_exactly
+
     async def test_never_fails_while_delivering_a_malformed_error_message(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -576,6 +659,8 @@ class TestDeliveryAndDedup:
         assert str(errors[0]).startswith("bad ")
         assert setup.channel.state == "connected"
 
+    # end method test_never_fails_while_delivering_a_malformed_error_message
+
     async def test_strips_a_leading_byte_order_mark_from_an_error_message(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -585,6 +670,8 @@ class TestDeliveryAndDedup:
         sockets[-1].receive(b"-Err\n+SendError\n$-1\n$6\n\xef\xbb\xbfbad\n$-1\n")
 
         assert str(errors[0]) == "bad"
+
+    # end method test_strips_a_leading_byte_order_mark_from_an_error_message
 
     async def test_contains_throwing_listeners_and_honors_mid_dispatch_disposal(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
@@ -598,6 +685,8 @@ class TestDeliveryAndDedup:
             order.append("first")
             dispose_second()
             raise RuntimeError("listener-secret")
+
+        # end function first
 
         setup.channel.segment("chat").on_message(first)
         dispose_second = setup.channel.segment("chat").on_message(
@@ -614,6 +703,8 @@ class TestDeliveryAndDedup:
         assert str(errors[0]) == LISTENER_FAILURE
         assert setup.channel.state == "connected"
 
+    # end method test_contains_throwing_listeners_and_honors_mid_dispatch_disposal
+
     async def test_fans_out_nested_arrays_preserving_arrival_order(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -625,6 +716,11 @@ class TestDeliveryAndDedup:
 
         assert delivered == ["al-1", "al-2"]
 
+    # end method test_fans_out_nested_arrays_preserving_arrival_order
+
+
+# end class TestDeliveryAndDedup
+
 
 class TestChannelWideDelivery:
     async def test_receives_every_segments_deliveries_with_or_without_listeners(
@@ -635,6 +731,8 @@ class TestChannelWideDelivery:
         def record(payload: bytes, metadata: MessageMetadata) -> None:
             seen.append(f"{metadata.segment_id}:{payload.decode()}")
 
+        # end function record
+
         setup.channel.events().on_message(record)
         setup.channel.segment("chat").on_message(lambda payload, metadata: None)
 
@@ -643,6 +741,8 @@ class TestChannelWideDelivery:
         sockets[-1].receive(message_frame("joined-by-publish", "id-3", "ok"))
 
         assert seen == ["chat:hi", "default:yo", "joined-by-publish:ok"]
+
+    # end method test_receives_every_segments_deliveries_with_or_without_listeners
 
     async def test_runs_after_the_segments_listeners_in_the_same_dispatch(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
@@ -659,6 +759,8 @@ class TestChannelWideDelivery:
 
         assert order == ["segment", "channel"]
 
+    # end method test_runs_after_the_segments_listeners_in_the_same_dispatch
+
     async def test_sees_a_duplicate_once_and_never_a_delivery_without_an_id(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -673,6 +775,8 @@ class TestChannelWideDelivery:
 
         assert delivered == ["id-1"]
 
+    # end method test_sees_a_duplicate_once_and_never_a_delivery_without_an_id
+
     async def test_contains_a_raising_listener_and_stops_after_disposal(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -682,6 +786,8 @@ class TestChannelWideDelivery:
 
         def raise_failure(payload: bytes, metadata: MessageMetadata) -> None:
             raise RuntimeError("listener-secret")
+
+        # end function raise_failure
 
         stop_raising = setup.channel.events().on_message(raise_failure)
         stop_recording = setup.channel.events().on_message(
@@ -698,6 +804,8 @@ class TestChannelWideDelivery:
         assert str(errors[0]) == LISTENER_FAILURE
         assert setup.channel.state == "connected"
 
+    # end method test_contains_a_raising_listener_and_stops_after_disposal
+
     async def test_puts_nothing_on_the_wire_for_a_listener_alone(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -705,6 +813,8 @@ class TestChannelWideDelivery:
         setup.channel.events().on_message(lambda payload, metadata: None)
 
         sockets[-1].send.assert_not_called()
+
+    # end method test_puts_nothing_on_the_wire_for_a_listener_alone
 
     async def test_removes_only_its_own_channel_listener(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
@@ -728,6 +838,8 @@ class TestChannelWideDelivery:
         assert delivered == ["segment", "channel"]
         assert sockets[-1].sent_frames() == ["@SUB\n$4\nchat\n"]
 
+    # end method test_removes_only_its_own_channel_listener
+
     # The server decides what arrives; the SDK never gates on subscriptions.
     async def test_delivers_whatever_the_subscription_state(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
@@ -739,9 +851,17 @@ class TestChannelWideDelivery:
 
         assert delivered == ["id-1"]
 
+    # end method test_delivers_whatever_the_subscription_state
+
+
+# end class TestChannelWideDelivery
+
 
 def rate_limit_frame() -> bytes:
     return error_frame("RateLimitError", "Rate limit exceeded")
+
+
+# end function rate_limit_frame
 
 
 # Eight limits in a row, each followed by its resend round: from here on the
@@ -752,8 +872,12 @@ async def exhaust_rate_limit(socket: FakeWebSocket, timers: FakeTimers) -> None:
         await timers.advance(31_000)
 
 
+# end function exhaust_rate_limit
+
+
 class TestRateLimitRecovery:
-    async def test_pauses_then_resends_recent_subscriptions_before_publishes(
+    # R1, R3
+    async def test_pauses_then_resends_recent_subscriptions_before_recent_publishes(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
         errors: list[ChannelError] = []
@@ -785,38 +909,73 @@ class TestRateLimitRecovery:
             "@PUB\n$5\nlobby\n$11\ngenerated-2\n$1\nb\n",
         ]
 
-    async def test_resends_a_publish_once_and_only_within_the_window(
+    # end method test_pauses_then_resends_recent_subscriptions_before_recent_publishes
+
+    # R2
+    async def test_resends_a_command_sent_exactly_2000_ms_before_the_limit_not_2001(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
         socket = sockets[-1]
-        chat = setup.channel.segment("chat")
-        await chat.publish(b"old")
-        setup.clocks.monotonic += 2_001
-        await chat.publish(b"new")
+        setup.channel.segment("early").subscribe()
+        await setup.channel.segment("chat").publish(b"old")
+        setup.clocks.monotonic += 1
+        setup.channel.segment("edge").subscribe()
+        await setup.channel.segment("chat").publish(b"edge")
+        setup.clocks.monotonic += 2_000
         socket.send.reset_mock()
 
         socket.receive(rate_limit_frame())
         await timers.advance(1_000)
 
-        assert socket.sent_frames() == ["@PUB\n$4\nchat\n$11\ngenerated-2\n$3\nnew\n"]
+        assert socket.sent_frames() == [
+            "@SUB\n$4\nedge\n",
+            "@PUB\n$4\nchat\n$11\ngenerated-2\n$4\nedge\n",
+        ]
+
+    # end method test_resends_a_command_sent_exactly_2000_ms_before_the_limit_not_2001
+
+    # R4
+    async def test_resends_a_publish_byte_for_byte_with_its_original_id_and_only_once(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        socket = sockets[-1]
+        await setup.channel.segment("chat").publish(b"x", message_id="original-id")
+        original = socket.send.call_args_list[0].args[0]
+        socket.send.reset_mock()
+
+        socket.receive(rate_limit_frame())
+        await timers.advance(1_000)
+
+        assert [call.args[0] for call in socket.send.call_args_list] == [original]
 
         socket.send.reset_mock()
         socket.receive(rate_limit_frame())
-        await timers.advance(30_000)
+        await timers.advance(31_000)
 
         socket.send.assert_not_called()
 
-    async def test_sends_one_command_for_a_subscription_toggled_while_paused(
+    # end method test_resends_a_publish_byte_for_byte_with_its_original_id_and_only_once
+
+    # R6
+    async def test_sends_one_command_with_the_final_state_for_a_toggle_while_paused(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
         sockets[-1].receive(rate_limit_frame())
 
         setup.channel.segment("chat").subscribe().cancel()
         setup.channel.segment("chat").subscribe()
+        setup.channel.segment("lobby").subscribe().cancel()
         await timers.advance(1_000)
 
-        assert sockets[-1].sent_frames() == ["@SUB\n$4\nchat\n"]
+        # The lobby nets out to never subscribed: UNSUB is its final state.
+        assert sockets[-1].sent_frames() == [
+            "@SUB\n$4\nchat\n",
+            "@UNSUB\n$5\nlobby\n",
+        ]
 
+    # end method test_sends_one_command_with_the_final_state_for_a_toggle_while_paused
+
+    # R7
     async def test_backs_off_on_consecutive_limits_and_starts_over_after_quiet(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -824,7 +983,12 @@ class TestRateLimitRecovery:
         socket = sockets[-1]
         setup.channel.segment("chat").subscribe()
 
-        for pause_ms in [1_500, 2_000]:
+        # 1 000 ms plus the reconnect delay for the streak index, which is
+        # capped at 30 000 ms. The seventh limit is the first to reach the cap,
+        # and the eighth stays there.
+        pauses_ms = [1_500, 2_000, 3_000, 5_000, 9_000, 17_000, 31_000, 31_000]
+
+        for pause_ms in pauses_ms:
             socket.send.reset_mock()
             socket.receive(rate_limit_frame())
             await timers.advance(pause_ms - 1)
@@ -833,13 +997,18 @@ class TestRateLimitRecovery:
             await timers.advance(1)
             assert socket.sent_frames() == ["@SUB\n$4\nchat\n"]
 
-        setup.clocks.monotonic += 10_000
+        # Past the last pause and its suspect window, the streak starts over.
+        setup.clocks.monotonic += 40_000
         setup.channel.segment("lobby").subscribe()
         socket.send.reset_mock()
         socket.receive(rate_limit_frame())
-        await timers.advance(1_500)
+        await timers.advance(1_499)
+        socket.send.assert_not_called()
 
+        await timers.advance(1)
         assert socket.sent_frames() == ["@SUB\n$5\nlobby\n"]
+
+    # end method test_backs_off_on_consecutive_limits_and_starts_over_after_quiet
 
     async def test_withdraws_a_queued_publish_when_its_caller_is_cancelled(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -854,6 +1023,8 @@ class TestRateLimitRecovery:
         assert isinstance(await failure_of(pending), asyncio.CancelledError)
         await timers.advance(1_000)
         socket.send.assert_not_called()
+
+    # end method test_withdraws_a_queued_publish_when_its_caller_is_cancelled
 
     async def test_rejects_queued_publishes_when_the_channel_closes(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
@@ -870,6 +1041,8 @@ class TestRateLimitRecovery:
             "Cancelled",
             "Channel closed before the publish was sent.",
         )
+
+    # end method test_rejects_queued_publishes_when_the_channel_closes
 
     async def test_never_sends_a_change_ahead_of_an_earlier_publish_to_its_segment(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -890,13 +1063,34 @@ class TestRateLimitRecovery:
             "@UNSUB\n$4\nchat\n",
         ]
 
-    async def test_resends_dropped_subscriptions_on_a_slow_doubling_probe(
+    # end method test_never_sends_a_change_ahead_of_an_earlier_publish_to_its_segment
+
+    # R9
+    async def test_resends_at_the_eighth_limit_and_drops_publishes_from_the_ninth(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
         socket = sockets[-1]
         setup.channel.segment("chat").subscribe()
-        await exhaust_rate_limit(socket, timers)
 
+        for _ in range(7):
+            socket.receive(rate_limit_frame())
+            await timers.advance(31_000)
+
+        await setup.channel.segment("lobby").publish(b"x")
+
+        # The eighth limit in a row still resends both kinds.
+        socket.send.reset_mock()
+        socket.receive(rate_limit_frame())
+        await timers.advance(1_000)
+        assert socket.sent_frames() == [
+            "@SUB\n$4\nchat\n",
+            "@PUB\n$5\nlobby\n$11\ngenerated-1\n$1\nx\n",
+        ]
+
+        await setup.channel.segment("lobby").publish(b"y")
+
+        # The ninth is a quota: nothing is resent, the publishes are dropped,
+        # and the subscription waits for the probe.
         socket.send.reset_mock()
         socket.receive(rate_limit_frame())
         await timers.advance(59_999)
@@ -905,15 +1099,43 @@ class TestRateLimitRecovery:
         await timers.advance(1)
         assert socket.sent_frames() == ["@SUB\n$4\nchat\n"]
 
-        socket.send.reset_mock()
-        socket.receive(rate_limit_frame())
-        await timers.advance(119_999)
-        socket.send.assert_not_called()
-
-        await timers.advance(1)
+        await timers.advance(31_000)
         assert socket.sent_frames() == ["@SUB\n$4\nchat\n"]
 
-    async def test_resends_normally_once_commands_go_a_window_without_a_limit(
+    # end method test_resends_at_the_eighth_limit_and_drops_publishes_from_the_ninth
+
+    # R10
+    async def test_resends_dropped_subscriptions_on_a_doubling_probe_up_to_one_hour(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        socket = sockets[-1]
+        setup.channel.segment("chat").subscribe()
+        await exhaust_rate_limit(socket, timers)
+
+        probe_delays_ms = [
+            60_000,
+            120_000,
+            240_000,
+            480_000,
+            960_000,
+            1_920_000,
+            3_600_000,
+            3_600_000,
+        ]
+
+        for delay_ms in probe_delays_ms:
+            socket.send.reset_mock()
+            socket.receive(rate_limit_frame())
+            await timers.advance(delay_ms - 1)
+            socket.send.assert_not_called()
+
+            await timers.advance(1)
+            assert socket.sent_frames() == ["@SUB\n$4\nchat\n"]
+
+    # end method test_resends_dropped_subscriptions_on_a_doubling_probe_up_to_one_hour
+
+    # R11
+    async def test_resends_normally_again_once_commands_go_a_window_without_a_limit(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
         socket = sockets[-1]
@@ -930,7 +1152,10 @@ class TestRateLimitRecovery:
 
         assert socket.sent_frames() == ["@SUB\n$5\nlobby\n"]
 
-    async def test_keeps_probing_across_a_reconnect(
+    # end method test_resends_normally_again_once_commands_go_a_window_without_a_limit
+
+    # R12
+    async def test_keeps_probing_across_a_reconnect_instead_of_starting_over(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
         setup.channel.segment("chat").subscribe()
@@ -953,6 +1178,8 @@ class TestRateLimitRecovery:
         await timers.advance(1)
         assert restored.sent_frames() == ["@SUB\n$4\nchat\n"]
 
+    # end method test_keeps_probing_across_a_reconnect_instead_of_starting_over
+
     async def test_holds_a_change_only_behind_publishes_queued_before_it(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -973,6 +1200,9 @@ class TestRateLimitRecovery:
             "@PUB\n$4\nchat\n$11\ngenerated-2\n$1\n2\n",
         ]
 
+    # end method test_holds_a_change_only_behind_publishes_queued_before_it
+
+    # R8
     async def test_counts_one_episode_when_several_frames_report_the_same_burst(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -996,6 +1226,9 @@ class TestRateLimitRecovery:
         await timers.advance(1)
         assert socket.sent_frames() == ["@SUB\n$4\nchat\n"]
 
+    # end method test_counts_one_episode_when_several_frames_report_the_same_burst
+
+    # R15
     async def test_treats_a_late_report_while_probing_as_the_quota_still_exhausted(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -1016,6 +1249,8 @@ class TestRateLimitRecovery:
 
         await timers.advance(1)
         assert socket.sent_frames() == ["@SUB\n$4\nchat\n"]
+
+    # end method test_treats_a_late_report_while_probing_as_the_quota_still_exhausted
 
     async def test_ends_probing_when_a_limit_arrives_long_after_accepted_traffic(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -1040,6 +1275,8 @@ class TestRateLimitRecovery:
         await timers.advance(1_000)
         assert socket.sent_frames() == ["@SUB\n$5\nlobby\n"]
 
+    # end method test_ends_probing_when_a_limit_arrives_long_after_accepted_traffic
+
     async def test_counts_a_sent_presence_query_as_proof_the_quota_returned(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -1061,22 +1298,30 @@ class TestRateLimitRecovery:
         query.cancel()
         await failure_of(query)
 
+    # end method test_counts_a_sent_presence_query_as_proof_the_quota_returned
+
+    # R5
     async def test_resends_at_most_the_last_64_publishes(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
         socket = sockets[-1]
         lobby = setup.channel.segment("lobby")
 
-        for _ in range(70):
-            await lobby.publish(b"x")
+        for index in range(1, 66):
+            await lobby.publish(str(index).encode())
 
         socket.send.reset_mock()
         socket.receive(rate_limit_frame())
         await timers.advance(1_000)
 
-        assert socket.send.call_count == 64
-        assert socket.sent_frames()[0] == "@PUB\n$5\nlobby\n$11\ngenerated-7\n$1\nx\n"
+        assert socket.sent_frames() == [
+            publish_frame("lobby", f"generated-{index}", str(index))
+            for index in range(2, 66)
+        ]
 
+    # end method test_resends_at_most_the_last_64_publishes
+
+    # R13
     async def test_rejects_a_presence_query_while_sending_is_paused(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -1094,7 +1339,10 @@ class TestRateLimitRecovery:
             "Sending is paused after a rate limit; try again in a moment.",
         )
 
-    async def test_resends_subscriptions_restored_on_reconnect_after_a_limit(
+    # end method test_rejects_a_presence_query_while_sending_is_paused
+
+    # R14
+    async def test_resends_subscriptions_restored_on_reconnect_when_a_limit_follows(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
         setup.channel.segment("chat").subscribe()
@@ -1111,6 +1359,8 @@ class TestRateLimitRecovery:
 
         assert restored.sent_frames() == ["@SUB\n$4\nchat\n"]
         assert setup.channel.state == "connected"
+
+    # end method test_resends_subscriptions_restored_on_reconnect_when_a_limit_follows
 
     async def test_replaces_the_socket_when_a_subscription_write_fails(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -1134,6 +1384,11 @@ class TestRateLimitRecovery:
         assert sockets[-1].sent_frames() == ["@SUB\n$4\nchat\n"]
         assert errors == []
 
+    # end method test_replaces_the_socket_when_a_subscription_write_fails
+
+
+# end class TestRateLimitRecovery
+
 
 # Holds the fake writer full: any send is refused as backpressure.
 FULL_BUFFER = 2 * 1024 * 1024
@@ -1146,6 +1401,9 @@ def publish_frame(segment_id: str, message_id: str, body: str) -> str:
     )
 
 
+# end function publish_frame
+
+
 async def start_reconnect_attempt(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> FakeWebSocket:
@@ -1156,15 +1414,21 @@ async def start_reconnect_attempt(
     return sockets[-1]
 
 
+# end function start_reconnect_attempt
+
+
 async def reconnect(sockets: list[FakeWebSocket], timers: FakeTimers) -> None:
     (await start_reconnect_attempt(sockets, timers)).open()
     await flush()
 
 
+# end function reconnect
+
+
 class TestPublishesAcrossAReconnect:
     """QUEUE-01: a publish not yet given to a socket waits for the next one."""
 
-    async def test_queues_a_publish_while_reconnecting_and_sends_it_after_the_reconnect(
+    async def test_queues_a_publish_while_reconnecting_and_sends_it_after_reconnect(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
         sockets[-1].disconnect()
@@ -1179,7 +1443,9 @@ class TestPublishesAcrossAReconnect:
         assert setup.channel.state == "connected"
         assert sockets[-1].sent_frames() == [publish_frame("chat", "generated-1", "x")]
 
-    async def test_sends_publishes_waiting_behind_a_full_writer_after_the_reconnect_in_order(
+    # end method test_queues_a_publish_while_reconnecting_and_sends_it_after_reconnect
+
+    async def test_sends_publishes_waiting_behind_a_full_writer_in_order_on_reconnect(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
         sockets[-1].buffered_amount = FULL_BUFFER
@@ -1196,6 +1462,8 @@ class TestPublishesAcrossAReconnect:
             publish_frame("chat", "generated-2", "b"),
             publish_frame("chat", "generated-3", "c"),
         ]
+
+    # end method test_sends_publishes_waiting_behind_a_full_writer_in_order_on_reconnect
 
     async def test_restores_every_subscription_before_any_queued_publish(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -1223,6 +1491,8 @@ class TestPublishesAcrossAReconnect:
             publish_frame("news", "generated-2", "b"),
         ]
 
+    # end method test_restores_every_subscription_before_any_queued_publish
+
     async def test_refuses_a_publish_while_reconnecting_with_backpressure_when_full(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -1246,6 +1516,8 @@ class TestPublishesAcrossAReconnect:
         await queued
         assert sockets[-1].sent_frames() == [publish_frame("chat", "generated-1", "a")]
 
+    # end method test_refuses_a_publish_while_reconnecting_with_backpressure_when_full
+
     async def test_keeps_the_queue_through_a_failed_attempt_and_sends_it_on_the_next(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -1260,6 +1532,8 @@ class TestPublishesAcrossAReconnect:
         await reconnect(sockets, timers)
         await published
         assert sockets[-1].sent_frames() == [publish_frame("chat", "generated-1", "x")]
+
+    # end method test_keeps_the_queue_through_a_failed_attempt_and_sends_it_on_the_next
 
     async def test_rejects_each_queued_publish_with_the_terminal_error(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -1284,7 +1558,9 @@ class TestPublishesAcrossAReconnect:
         for pending in published:
             assert await failure_of(pending) is error
 
-    async def test_rejects_queued_publishes_with_cancelled_when_closed_while_reconnecting(
+    # end method test_rejects_each_queued_publish_with_the_terminal_error
+
+    async def test_rejects_queued_publishes_with_cancelled_on_close_while_reconnecting(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
         sockets[-1].disconnect()
@@ -1299,6 +1575,8 @@ class TestPublishesAcrossAReconnect:
             "Cancelled",
             "Channel closed before the publish was sent.",
         )
+
+    # end method test_rejects_queued_publishes_with_cancelled_on_close_while_reconnecting
 
     async def test_starts_an_explicit_connect_after_failed_with_an_empty_queue(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -1319,6 +1597,8 @@ class TestPublishesAcrossAReconnect:
 
         assert sockets[-1].sent_frames() == []
 
+    # end method test_starts_an_explicit_connect_after_failed_with_an_empty_queue
+
     async def test_never_resends_a_publish_the_previous_socket_was_given(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -1330,6 +1610,8 @@ class TestPublishesAcrossAReconnect:
         await timers.advance(5_000)
 
         assert sockets[-1].sent_frames() == []
+
+    # end method test_never_resends_a_publish_the_previous_socket_was_given
 
     async def test_withdraws_a_publish_queued_while_reconnecting_when_cancelled(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -1343,6 +1625,11 @@ class TestPublishesAcrossAReconnect:
         assert isinstance(await failure_of(published), asyncio.CancelledError)
         await reconnect(sockets, timers)
         assert sockets[-1].sent_frames() == []
+
+    # end method test_withdraws_a_publish_queued_while_reconnecting_when_cancelled
+
+
+# end class TestPublishesAcrossAReconnect
 
 
 async def test_contains_a_listener_that_raises_cancelled_error(
@@ -1359,6 +1646,8 @@ async def test_contains_a_listener_that_raises_cancelled_error(
         cancelled.cancel()
         cancelled.result()
 
+    # end function read_cancelled
+
     setup.channel.segment("chat").on_message(read_cancelled)
     setup.channel.segment("chat").on_message(
         lambda payload, metadata: delivered.append(metadata.message_id)
@@ -1370,6 +1659,9 @@ async def test_contains_a_listener_that_raises_cancelled_error(
     assert delivered == ["id-1", "id-2"]
     assert [str(error) for error in errors] == [LISTENER_FAILURE] * 2
     assert setup.channel.state == "connected"
+
+
+# end function test_contains_a_listener_that_raises_cancelled_error
 
 
 async def test_clears_the_dedup_window_on_an_explicit_connect(
@@ -1396,6 +1688,9 @@ async def test_clears_the_dedup_window_on_an_explicit_connect(
     assert delivered == ["id-1", "id-1"]
 
 
+# end function test_clears_the_dedup_window_on_an_explicit_connect
+
+
 async def test_holds_exactly_1024_ids_in_the_dedup_window(
     setup: ChannelSetup, sockets: list[FakeWebSocket]
 ) -> None:
@@ -1407,6 +1702,9 @@ async def test_holds_exactly_1024_ids_in_the_dedup_window(
     sockets[-1].receive(message_frame("chat", "id-0", "x"))
 
     assert len(delivered) == 1024
+
+
+# end function test_holds_exactly_1024_ids_in_the_dedup_window
 
 
 async def test_reports_a_listener_that_returns_a_coroutine(
@@ -1421,6 +1719,8 @@ async def test_reports_a_listener_that_returns_a_coroutine(
     async def handle(payload: bytes) -> None:
         handled.append(payload)
 
+    # end function handle
+
     # Typing refuses it; an untyped caller can still pass it.
     untyped: Any = lambda payload, metadata: handle(payload)  # noqa: E731
     setup.channel.segment("chat").on_message(untyped)
@@ -1429,3 +1729,6 @@ async def test_reports_a_listener_that_returns_a_coroutine(
 
     assert handled == []
     assert [str(error) for error in errors] == [LISTENER_FAILURE]
+
+
+# end function test_reports_a_listener_that_returns_a_coroutine

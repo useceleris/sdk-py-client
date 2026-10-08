@@ -33,11 +33,17 @@ async def setup(sockets: list[FakeWebSocket], timers: FakeTimers) -> ChannelSetu
     return await establish(create_test_channel(timers), sockets)
 
 
+# end function setup
+
+
 # An error answering the presence query with this request id.
 def presence_error_frame(type: str, request_id: str) -> bytes:
     return (
         f"-Err\n+{type}\n+PRES_LIST\n$6\nfailed\n${len(request_id)}\n{request_id}\n"
     ).encode()
+
+
+# end function presence_error_frame
 
 
 def presence_notify_frame(
@@ -53,12 +59,18 @@ def presence_notify_frame(
     ).encode()
 
 
+# end function presence_notify_frame
+
+
 def query(
     setup: ChannelSetup, segment_id: str = "chat", page: int = 1, per_page: int = 25
 ) -> "asyncio.Task[PresencePage]":
     return asyncio.ensure_future(
         setup.channel.segment(segment_id).presence_list(page=page, per_page=per_page)
     )
+
+
+# end function query
 
 
 class TestPresenceInterests:
@@ -79,6 +91,8 @@ class TestPresenceInterests:
             "@PRES_UNSUB\n$4\nchat\n",
         ]
 
+    # end method test_shares_one_ref_count_across_instances_with_golden_bytes
+
     async def test_sends_presence_commands_for_the_default_segment_too(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -88,6 +102,8 @@ class TestPresenceInterests:
             "@PRES_SUB\n$7\ndefault\n",
             "@PRES_UNSUB\n$7\ndefault\n",
         ]
+
+    # end method test_sends_presence_commands_for_the_default_segment_too
 
     async def test_sends_unsub_on_message_cancel_while_presence_is_held(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
@@ -110,6 +126,8 @@ class TestPresenceInterests:
             "@PRES_UNSUB\n$4\nchat\n",
         ]
 
+    # end method test_sends_unsub_on_message_cancel_while_presence_is_held
+
     async def test_flushes_messages_first_then_presence_in_registration_order(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -127,6 +145,8 @@ class TestPresenceInterests:
             "@PRES_SUB\n$5\nalpha\n",
         ]
 
+    # end method test_flushes_messages_first_then_presence_in_registration_order
+
     async def test_rejects_presence_interest_on_a_closed_channel(
         self, timers: FakeTimers
     ) -> None:
@@ -140,6 +160,8 @@ class TestPresenceInterests:
             "Channel is closed; create a new one with client.channel()."
         )
 
+    # end method test_rejects_presence_interest_on_a_closed_channel
+
     async def test_sends_a_presence_subscription_queued_behind_a_full_writer(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -149,6 +171,8 @@ class TestPresenceInterests:
 
         def bump(data: bytes) -> None:
             socket.buffered_amount += 1
+
+        # end function bump
 
         socket.send.side_effect = bump
 
@@ -164,6 +188,11 @@ class TestPresenceInterests:
         assert socket.sent_frames()[-1] == "@PRES_SUB\n$4\nchat\n"
         assert setup.channel.state == "connected"
         assert errors == []
+
+    # end method test_sends_a_presence_subscription_queued_behind_a_full_writer
+
+
+# end class TestPresenceInterests
 
 
 class TestPresenceQueries:
@@ -199,6 +228,8 @@ class TestPresenceQueries:
         )
         assert timers.count == 0
 
+    # end method test_resolves_a_matching_response_with_its_raw_metadata
+
     async def test_preserves_past_last_page_metadata(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -212,6 +243,8 @@ class TestPresenceQueries:
         page = await pending
         assert (page.from_, page.to, page.connections) == (26, 1, ())
 
+    # end method test_preserves_past_last_page_metadata
+
     async def test_rejects_overlap_while_the_first_resolves(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -224,6 +257,8 @@ class TestPresenceQueries:
 
         sockets[-1].receive(presence_response_frame())
         assert (await first).segment_id == "chat"
+
+    # end method test_rejects_overlap_while_the_first_resolves
 
     @pytest.mark.parametrize(
         ("page", "per_page"),
@@ -246,6 +281,8 @@ class TestPresenceQueries:
         sockets[-1].receive(presence_response_frame(request_id="2"))
         assert (await recovered).segment_id == "chat"
 
+    # end method test_rejects_out_of_range_bounds
+
     async def test_rejects_queries_while_not_connected(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -260,6 +297,8 @@ class TestPresenceQueries:
         error = await failure_of(query(setup))
         assert isinstance(error, CelerisConnectionError)
         assert error.code == "NotConnected"
+
+    # end method test_rejects_queries_while_not_connected
 
     async def test_times_out_without_disturbing_the_connection_and_drops_the_late_reply(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -297,6 +336,8 @@ class TestPresenceQueries:
         assert errors == []
         assert timers.count == 0
 
+    # end method test_times_out_without_disturbing_the_connection_and_drops_the_late_reply
+
     async def test_cancelling_frees_the_slot_and_stays_connected(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -315,6 +356,8 @@ class TestPresenceQueries:
         sockets[-1].receive(presence_response_frame(request_id="2", total=3))
         assert (await following).total == 3
 
+    # end method test_cancelling_frees_the_slot_and_stays_connected
+
     async def test_matches_a_response_by_request_id_alone(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -330,6 +373,8 @@ class TestPresenceQueries:
         sockets[-1].receive(presence_response_frame(request_id="1", current_page=7))
         assert (await pending).current_page == 7
         assert timers.count == 0
+
+    # end method test_matches_a_response_by_request_id_alone
 
     @pytest.mark.parametrize("type", ["InternalError", "PermissionDeniedError"])
     async def test_rejects_at_once_on_an_error_naming_the_query(
@@ -366,6 +411,8 @@ class TestPresenceQueries:
         sockets[-1].receive(presence_response_frame(request_id="2"))
         assert (await following).segment_id == "chat"
 
+    # end method test_rejects_at_once_on_an_error_naming_the_query
+
     async def test_drops_a_presence_query_error_for_any_other_request_id(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -380,6 +427,8 @@ class TestPresenceQueries:
 
         assert (await pending).segment_id == "chat"
         assert errors == []
+
+    # end method test_drops_a_presence_query_error_for_any_other_request_id
 
     async def test_rejects_the_pending_query_on_connection_loss_and_on_close(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -411,6 +460,8 @@ class TestPresenceQueries:
         )
         assert timers.count == 0
 
+    # end method test_rejects_the_pending_query_on_connection_loss_and_on_close
+
     async def test_rejects_a_query_whose_send_fails_and_stays_connected(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
@@ -429,6 +480,11 @@ class TestPresenceQueries:
         socket.receive(presence_response_frame(request_id="2"))
         assert (await following).segment_id == "chat"
         assert timers.count == 0
+
+    # end method test_rejects_a_query_whose_send_fails_and_stays_connected
+
+
+# end class TestPresenceQueries
 
 
 class TestNotices:
@@ -452,6 +508,8 @@ class TestNotices:
         sockets[-1].receive(b"@SERVER_MSG\n:8\n$4\nleft\n")
         assert seen == [("second", ServerNotice(8, b"left"))]
 
+    # end method test_delivers_raw_server_notices_in_order_with_working_disposal
+
     async def test_contains_throwing_notice_listeners(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -462,6 +520,8 @@ class TestNotices:
         def raise_secret(notice: ServerNotice) -> None:
             raise RuntimeError("notice-secret")
 
+        # end function raise_secret
+
         setup.channel.events().on_notice(raise_secret)
         setup.channel.events().on_notice(lambda notice: order.append("after"))
 
@@ -471,6 +531,8 @@ class TestNotices:
         assert len(errors) == 1
         assert str(errors[0]) == LISTENER_FAILURE
         assert setup.channel.state == "connected"
+
+    # end method test_contains_throwing_notice_listeners
 
     async def test_delivers_presence_notifications_to_their_own_segment_only(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
@@ -493,6 +555,8 @@ class TestNotices:
             PresenceEvent("chat", "user", "connection-1", False, 9),
         ]
 
+    # end method test_delivers_presence_notifications_to_their_own_segment_only
+
     async def test_shares_one_presence_listener_set_across_handler_instances(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -510,6 +574,8 @@ class TestNotices:
 
         assert seen == ["first", "second", "second"]
 
+    # end method test_shares_one_presence_listener_set_across_handler_instances
+
     async def test_ignores_a_notification_for_a_segment_with_no_listener(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -523,6 +589,8 @@ class TestNotices:
         assert errors == []
         assert setup.channel.state == "connected"
 
+    # end method test_ignores_a_notification_for_a_segment_with_no_listener
+
     async def test_contains_throwing_presence_listeners(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket]
     ) -> None:
@@ -533,6 +601,8 @@ class TestNotices:
         def raise_secret(event: PresenceEvent) -> None:
             raise RuntimeError("presence-secret")
 
+        # end function raise_secret
+
         setup.channel.segment("chat").on_presence(raise_secret)
         setup.channel.segment("chat").on_presence(lambda event: order.append("after"))
 
@@ -542,6 +612,11 @@ class TestNotices:
         assert len(errors) == 1
         assert str(errors[0]) == LISTENER_FAILURE
         assert setup.channel.state == "connected"
+
+    # end method test_contains_throwing_presence_listeners
+
+
+# end class TestNotices
 
 
 async def test_never_reuses_a_request_id_across_a_reconnect(
@@ -568,6 +643,9 @@ async def test_never_reuses_a_request_id_across_a_reconnect(
     assert (await second).total == 4
 
 
+# end function test_never_reuses_a_request_id_across_a_reconnect
+
+
 async def test_still_reconnects_when_a_cancelled_query_meets_a_lost_connection(
     setup: ChannelSetup, sockets: list[FakeWebSocket]
 ) -> None:
@@ -581,6 +659,9 @@ async def test_still_reconnects_when_a_cancelled_query_meets_a_lost_connection(
     assert isinstance(await failure_of(pending), asyncio.CancelledError)
     assert setup.channel.state == "reconnecting"
     await setup.channel.close()
+
+
+# end function test_still_reconnects_when_a_cancelled_query_meets_a_lost_connection
 
 
 async def test_a_late_cancel_never_frees_the_next_querys_slot(
@@ -600,3 +681,6 @@ async def test_a_late_cancel_never_frees_the_next_querys_slot(
 
     assert (await second).total == 5
     await failure_of(first)
+
+
+# end function test_a_late_cancel_never_frees_the_next_querys_slot

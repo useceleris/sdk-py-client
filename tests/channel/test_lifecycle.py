@@ -27,6 +27,9 @@ async def provide(request: CredentialRequest) -> Credentials:
     return TEST_CREDENTIALS
 
 
+# end function provide
+
+
 async def test_moves_idle_to_connecting_to_connected(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -44,6 +47,9 @@ async def test_moves_idle_to_connecting_to_connected(
 
     assert channel.state == "connected"
     assert states == ["connecting", "connected"]
+
+
+# end function test_moves_idle_to_connecting_to_connected
 
 
 async def test_rejects_concurrent_connect_with_operation_in_progress(
@@ -70,6 +76,9 @@ async def test_rejects_concurrent_connect_with_operation_in_progress(
     assert channel.state == "connected"
 
 
+# end function test_rejects_concurrent_connect_with_operation_in_progress
+
+
 async def test_rejects_connect_after_close_with_not_connected(
     timers: FakeTimers,
 ) -> None:
@@ -81,6 +90,9 @@ async def test_rejects_connect_after_close_with_not_connected(
 
     assert caught.value.code == "NotConnected"
     assert channel.state == "closed"
+
+
+# end function test_rejects_connect_after_close_with_not_connected
 
 
 async def test_fails_initial_connect_without_dispatching_on_error(
@@ -99,6 +111,9 @@ async def test_fails_initial_connect_without_dispatching_on_error(
     assert errors == []
 
 
+# end function test_fails_initial_connect_without_dispatching_on_error
+
+
 async def test_permits_explicit_restart_from_failed(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -111,6 +126,9 @@ async def test_permits_explicit_restart_from_failed(
     assert setup.channel.state == "failed"
     await establish(setup, sockets)
     assert setup.channel.state == "connected"
+
+
+# end function test_permits_explicit_restart_from_failed
 
 
 async def test_cancelling_connect_cancels_the_attempt_and_fails_the_channel(
@@ -128,6 +146,8 @@ async def test_cancelling_connect_cancels_the_attempt_and_fails_the_channel(
 
         raise AssertionError("unreachable")
 
+    # end function hang
+
     setup.credential_provider.side_effect = hang
     pending = asyncio.ensure_future(setup.channel.connect())
     await flush()
@@ -141,6 +161,9 @@ async def test_cancelling_connect_cancels_the_attempt_and_fails_the_channel(
     assert timers.count == 0
 
 
+# end function test_cancelling_connect_cancels_the_attempt_and_fails_the_channel
+
+
 async def test_passes_initial_credential_requests_without_outage_fields(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -151,10 +174,16 @@ async def test_passes_initial_credential_requests_without_outage_fields(
     )
 
 
+# end function test_passes_initial_credential_requests_without_outage_fields
+
+
 async def test_returns_the_same_handler_from_events(timers: FakeTimers) -> None:
     channel = create_test_channel(timers).channel
 
     assert channel.events() is channel.events()
+
+
+# end function test_returns_the_same_handler_from_events
 
 
 async def test_dispatches_state_listeners_in_order_with_working_disposal(
@@ -178,6 +207,9 @@ async def test_dispatches_state_listeners_in_order_with_working_disposal(
     assert isinstance(await failure_of(connecting), CelerisConnectionError)
 
 
+# end function test_dispatches_state_listeners_in_order_with_working_disposal
+
+
 async def test_skips_a_listener_disposed_mid_dispatch_and_allows_duplicates(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -189,8 +221,12 @@ async def test_skips_a_listener_disposed_mid_dispatch_and_allows_duplicates(
         order.append("first")
         dispose_second()
 
+    # end function first
+
     def shared(state: str) -> None:
         order.append("shared")
+
+    # end function shared
 
     channel.events().on_state_change(first)
     dispose_second = channel.events().on_state_change(
@@ -210,6 +246,9 @@ async def test_skips_a_listener_disposed_mid_dispatch_and_allows_duplicates(
     await failure_of(connecting)
 
 
+# end function test_skips_a_listener_disposed_mid_dispatch_and_allows_duplicates
+
+
 async def test_contains_throwing_listeners_and_reports_once_through_on_error(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -219,6 +258,8 @@ async def test_contains_throwing_listeners_and_reports_once_through_on_error(
 
     def raise_secret(value: object) -> None:
         raise RuntimeError("listener-secret")
+
+    # end function raise_secret
 
     channel.events().on_error(errors.append)
     channel.events().on_error(raise_secret)
@@ -242,11 +283,16 @@ async def test_contains_throwing_listeners_and_reports_once_through_on_error(
     await failure_of(connecting)
 
 
+# end function test_contains_throwing_listeners_and_reports_once_through_on_error
+
+
 async def test_refuses_coroutine_function_listeners(timers: FakeTimers) -> None:
     channel = create_test_channel(timers).channel
 
     async def listener(state: str) -> None:
         pass
+
+    # end function listener
 
     untyped: Any = listener
 
@@ -260,6 +306,9 @@ async def test_refuses_coroutine_function_listeners(timers: FakeTimers) -> None:
 
     with pytest.raises(ConfigurationError):
         channel.default_segment().on_message(untyped)
+
+
+# end function test_refuses_coroutine_function_listeners
 
 
 async def test_fails_the_attempt_when_the_socket_closes_as_it_opens(
@@ -280,6 +329,9 @@ async def test_fails_the_attempt_when_the_socket_closes_as_it_opens(
         "The WebSocket closed as soon as it opened.",
     )
     assert channel.state == "failed"
+
+
+# end function test_fails_the_attempt_when_the_socket_closes_as_it_opens
 
 
 async def test_creates_a_fresh_channel_per_call_and_validates_references_eagerly(
@@ -303,6 +355,9 @@ async def test_creates_a_fresh_channel_per_call_and_validates_references_eagerly
     assert sockets == []
 
 
+# end function test_creates_a_fresh_channel_per_call_and_validates_references_eagerly
+
+
 async def test_connects_to_the_built_in_endpoint_when_no_base_url_is_given(
     sockets: list[FakeWebSocket],
 ) -> None:
@@ -319,6 +374,9 @@ async def test_connects_to_the_built_in_endpoint_when_no_base_url_is_given(
     await channel.close()
 
 
+# end function test_connects_to_the_built_in_endpoint_when_no_base_url_is_given
+
+
 async def test_rejects_connect_while_reconnecting(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -330,6 +388,9 @@ async def test_rejects_connect_while_reconnecting(
 
     assert caught.value.code == "OperationInProgress"
     await setup.channel.close()
+
+
+# end function test_rejects_connect_while_reconnecting
 
 
 async def test_closes_a_socket_that_opened_as_the_channel_closed(
@@ -351,6 +412,9 @@ async def test_closes_a_socket_that_opened_as_the_channel_closed(
     sockets[0].send.assert_not_called()
 
 
+# end function test_closes_a_socket_that_opened_as_the_channel_closed
+
+
 async def test_fails_an_initial_connect_whose_restoring_write_fails(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -370,6 +434,9 @@ async def test_fails_an_initial_connect_whose_restoring_write_fails(
     assert timers.count == 0
 
 
+# end function test_fails_an_initial_connect_whose_restoring_write_fails
+
+
 async def test_reports_nothing_received_before_connect_resumes(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -386,6 +453,9 @@ async def test_reports_nothing_received_before_connect_resumes(
     assert errors == []
 
 
+# end function test_reports_nothing_received_before_connect_resumes
+
+
 async def test_a_listener_added_during_dispatch_waits_for_the_next_event(
     sockets: list[FakeWebSocket], timers: FakeTimers
 ) -> None:
@@ -395,6 +465,8 @@ async def test_a_listener_added_during_dispatch_waits_for_the_next_event(
     def add_another(state: str) -> None:
         channel.events().on_state_change(lambda later: seen.append(later))
 
+    # end function add_another
+
     channel.events().on_state_change(add_another)
     connecting = asyncio.ensure_future(channel.connect())
     await flush()
@@ -403,6 +475,9 @@ async def test_a_listener_added_during_dispatch_waits_for_the_next_event(
     await channel.close()
     await failure_of(connecting)
     assert seen[:1] == ["closing"]
+
+
+# end function test_a_listener_added_during_dispatch_waits_for_the_next_event
 
 
 async def test_never_nests_error_dispatch(
@@ -417,11 +492,18 @@ async def test_never_nests_error_dispatch(
         setup.channel.events().on_state_change(fail)
         sockets[-1].disconnect()
 
+    # end function report
+
     def fail(state: str) -> None:
         raise RuntimeError("synthetic")
+
+    # end function fail
 
     setup.channel.events().on_error(report)
     sockets[-1].receive(b"-Err\n+SendError\n$-1\n$1\nx\n$-1\n")
 
     assert len(errors) == 1
     await setup.channel.close()
+
+
+# end function test_never_nests_error_dispatch

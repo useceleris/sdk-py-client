@@ -22,6 +22,8 @@ class TestTextPayloads:
         assert payload == value.encode()
         assert read_text(payload) == value
 
+    # end method test_round_trips_byte_identically
+
     def test_rejects_payloads_that_are_not_valid_utf8(self) -> None:
         # A lone continuation byte cannot start a sequence.
         with pytest.raises(ConfigurationError) as caught:
@@ -33,8 +35,12 @@ class TestTextPayloads:
         )
         assert caught.value.__context__ is None
 
+    # end method test_rejects_payloads_that_are_not_valid_utf8
+
     def test_preserves_a_byte_order_mark(self) -> None:
         assert read_text(b"\xef\xbb\xbfx") == "﻿x"
+
+    # end method test_preserves_a_byte_order_mark
 
     def test_rejects_text_with_unpaired_surrogates(self) -> None:
         with pytest.raises(ConfigurationError) as caught:
@@ -45,6 +51,11 @@ class TestTextPayloads:
         )
         assert caught.value.__context__ is None
         assert "synthetic-secret" not in repr(caught.value)
+
+    # end method test_rejects_text_with_unpaired_surrogates
+
+
+# end class TestTextPayloads
 
 
 class TestJsonPayloads:
@@ -57,6 +68,8 @@ class TestJsonPayloads:
         )
         assert read_json(payload) == value
 
+    # end method test_round_trips_values_through_the_wire_encoding
+
     @pytest.mark.parametrize(
         "value", [math.nan, math.inf, -math.inf, {1, 2}, b"bytes", object()]
     )
@@ -68,6 +81,8 @@ class TestJsonPayloads:
             "Value is not JSON-serializable: it is circular, or contains NaN, an "
             "infinity or a type JSON cannot represent."
         )
+
+    # end method test_rejects_values_json_cannot_represent
 
     def test_rejects_nesting_too_deep_to_serialize(self) -> None:
         # Deep enough to exhaust the interpreter's recursion protection on
@@ -82,6 +97,8 @@ class TestJsonPayloads:
         ):
             json_payload(value)
 
+    # end method test_rejects_nesting_too_deep_to_serialize
+
     def test_escapes_unpaired_surrogates_as_json_stringify_does(self) -> None:
         value = {"lone": chr(0xD800), "pair": "😀", "text": chr(0xDFFF) + "x"}
 
@@ -89,6 +106,8 @@ class TestJsonPayloads:
 
         assert payload == ('{"lone":"\\ud800","pair":"😀","text":"\\udfffx"}'.encode())
         assert read_json(payload) == value
+
+    # end method test_escapes_unpaired_surrogates_as_json_stringify_does
 
     def test_rejects_circular_structures_without_leaking_the_input(self) -> None:
         circular: dict[str, Any] = {"secret": "synthetic-marker"}
@@ -104,6 +123,8 @@ class TestJsonPayloads:
         assert caught.value.__context__ is None
         assert "synthetic-marker" not in repr(caught.value)
 
+    # end method test_rejects_circular_structures_without_leaking_the_input
+
     def test_rejects_json_nested_too_deep_to_read(self) -> None:
         # Deep enough to exhaust the parser's recursion protection on every
         # supported version.
@@ -113,6 +134,8 @@ class TestJsonPayloads:
         assert str(caught.value) == "Payload is valid UTF-8 but not valid JSON."
         assert caught.value.__context__ is None
 
+    # end method test_rejects_json_nested_too_deep_to_read
+
     @pytest.mark.parametrize("text", ["{ not json", "NaN", "[Infinity]", "-Infinity"])
     def test_rejects_payloads_that_are_not_valid_json(self, text: str) -> None:
         with pytest.raises(ConfigurationError) as caught:
@@ -120,6 +143,11 @@ class TestJsonPayloads:
 
         assert str(caught.value) == "Payload is valid UTF-8 but not valid JSON."
         assert caught.value.__context__ is None
+
+    # end method test_rejects_payloads_that_are_not_valid_json
+
+
+# end class TestJsonPayloads
 
 
 class TestPayloadCodecs:
@@ -134,11 +162,15 @@ class TestPayloadCodecs:
         assert payload == b'{"body": "hello"}'
         assert codec.read_payload(payload) == {"body": "hello"}
 
+    # end method test_round_trips_through_the_supplied_encoder
+
     def test_propagates_the_callers_own_failures_unchanged(self) -> None:
         failure = RuntimeError("synthetic-decoder-failure")
 
         def fail(payload: bytes) -> str:
             raise failure
+
+        # end function fail
 
         codec = create_payload_codec(encode=lambda value: b"", decode=fail)
 
@@ -146,6 +178,8 @@ class TestPayloadCodecs:
             codec.read_payload(b"")
 
         assert caught.value is failure
+
+    # end method test_propagates_the_callers_own_failures_unchanged
 
     @pytest.mark.parametrize(
         ("encode", "decode"), [(None, lambda payload: payload), (bytes, 1)]
@@ -157,3 +191,8 @@ class TestPayloadCodecs:
             create_payload_codec(encode=encode, decode=decode)
 
         assert str(caught.value) == "Codec must provide encode and decode functions."
+
+    # end method test_rejects_functions_that_are_not_callable
+
+
+# end class TestPayloadCodecs

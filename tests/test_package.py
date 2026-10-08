@@ -47,6 +47,9 @@ def test_exports_exactly_the_public_surface() -> None:
         assert hasattr(useceleris_client, name), name
 
 
+# end function test_exports_exactly_the_public_surface
+
+
 def test_every_error_shares_one_root() -> None:
     for error in [
         useceleris_client.ConfigurationError,
@@ -57,12 +60,18 @@ def test_every_error_shares_one_root() -> None:
         assert issubclass(error, useceleris_client.CelerisError)
 
 
+# end function test_every_error_shares_one_root
+
+
 def test_credentials_never_appear_in_their_repr() -> None:
     credentials = useceleris_client.Credentials(
         payload="synthetic-payload", signature="synthetic-signature"
     )
 
     assert "synthetic" not in repr(credentials)
+
+
+# end function test_credentials_never_appear_in_their_repr
 
 
 IMPORT_PROBE = """
@@ -89,3 +98,6 @@ assert threading.active_count() == 1, "importing started a thread"
 
 def test_importing_opens_no_socket_and_starts_no_work() -> None:
     subprocess.run([sys.executable, "-c", IMPORT_PROBE], check=True)
+
+
+# end function test_importing_opens_no_socket_and_starts_no_work
