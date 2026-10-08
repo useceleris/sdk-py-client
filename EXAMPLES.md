@@ -151,7 +151,7 @@ try:
     await chat.publish(data)
 except CelerisConnectionError as error:
     if error.code == "NotConnected":
-        ...  # offline: nothing was queued
+        ...  # idle, connecting, failed or closed: nothing was queued
     elif error.code == "Backpressure":
         ...  # 64 publishes already waiting: slow down
     elif error.code == "DeliveryUnknown":
@@ -331,4 +331,4 @@ print(sent_at.isoformat(), page.total)
 
 ## What this API will never do
 
-No offline queue, no automatic resend of publishes beyond rate-limit recovery, no server receipts or acks (the protocol has none), no durable history, no global ordering, no signing in the client. Presence joins and leaves *are* typed, because the wire frame carrying them is.
+No queue beyond a reconnect (a publish made while reconnecting waits and is sent after it; waiting publishes are refused on `failed` or close), no automatic resend of a publish already given to a socket beyond rate-limit recovery, no server receipts or acks (the protocol has none), no durable history, no global ordering, no signing in the client. Presence joins and leaves *are* typed, because the wire frame carrying them is.

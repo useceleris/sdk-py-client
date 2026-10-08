@@ -49,9 +49,15 @@ def sign_credentials() -> Credentials:
     return Credentials(payload=payload, signature=signature)
 
 
+# end function sign_credentials
+
+
 # Called once per connection attempt, so credentials are always fresh.
 async def provide_credentials(request: CredentialRequest) -> Credentials:
     return sign_credentials()
+
+
+# end function provide_credentials
 
 
 async def main() -> None:
@@ -76,6 +82,8 @@ async def main() -> None:
         # Payload first; metadata carries the sender, the id and the time.
         delivered.append(read_text(payload))
 
+    # end function receive
+
     chat.on_message(receive)
     await asyncio.sleep(1)
 
@@ -96,6 +104,9 @@ async def main() -> None:
     await channel.close()
 
     print(f"example: ok delivered={len(delivered)} present={page.total}")
+
+
+# end function main
 
 
 if __name__ == "__main__":

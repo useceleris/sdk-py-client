@@ -200,7 +200,7 @@ try:
     await chat.publish(data, message_id=str(uuid.uuid4()))  # your own id
 except CelerisConnectionError as error:
     if error.code == "NotConnected":
-        ...  # not connected, or the connection dropped first: nothing is queued
+        ...  # idle, connecting, failed or closed: nothing is queued
     elif error.code == "Backpressure":
         ...  # publish_queue_size publishes (64 by default) are already waiting: slow down
     elif error.code == "DeliveryUnknown":
@@ -208,6 +208,8 @@ except CelerisConnectionError as error:
 ```
 
 Returning means the local socket accepted the bytes, nothing more: there is no receipt. A server denial (`PermissionDeniedError`) or plan size rejection (`MessageSizeLimitError`) arrives afterwards through `events().on_error`. Publishing joins the segment server-side, without granting read permission. Without `message_id`, a random id is generated. The payload must be `bytes`, and may be empty; a command over 2 MiB encoded, or an invalid id, raises `ConfigurationError` before anything is sent. Cancelling the task awaiting `publish()` withdraws a publish that has not gone out.
+
+While the channel is `reconnecting`, a publish waits in the queue and returns once it is sent on the new connection, after the restored subscriptions; the queue limit still applies. Publishes waiting when the connection drops wait the same way. When recovery ends in `failed`, each waiting publish raises the error `on_error` reports; `close()` makes each raise `Cancelled`. A publish the old connection was already given is never sent again.
 
 ## Payloads
 
@@ -322,7 +324,7 @@ A call you await raises its own failure rather than reporting it through `on_err
 | `Timeout`             | `CelerisConnectionError` | The connect deadline (credentials and handshake together) or a presence query deadline elapsed                                  |
 | `Cancelled`           | `CelerisConnectionError` | The channel was closed during a connect, a waiting publish or a presence query                                                  |
 | `Transport`           | `CelerisConnectionError` | A handshake or socket failure, a credential provider that raised, or a listener that raised                                     |
-| `NotConnected`        | `CelerisConnectionError` | Publishing or querying while not connected, a waiting publish lost with the connection, or a closed channel                     |
+| `NotConnected`        | `CelerisConnectionError` | Publishing outside `connected` and `reconnecting`, querying while not connected, or a closed channel                            |
 | `Backpressure`        | `CelerisConnectionError` | `publish_queue_size` publishes, 64 by default, are already waiting, or a presence query found the writer full or sending paused |
 | `OperationInProgress` | `CelerisConnectionError` | A second `connect()` or `presence_list()` while one is running                                                                  |
 | `DeliveryUnknown`     | `CelerisConnectionError` | The socket failed after taking the command: it may or may not have been sent                                                    |
@@ -372,7 +374,7 @@ def recovered(event: RecoveryEvent) -> None:
 stop_recovery = channel.events().on_recovery(recovered)
 ```
 
-On success the state becomes `connected`, then `on_recovery` fires. Subscriptions and presence interests are restored. Publishes still waiting when the connection dropped failed with `NotConnected` and are never resent; a pending presence query failed with `Transport`. The reconnect asks for a replay lookback covering the outage plus 5 s, and the `replay` claim your endpoint signs decides what is replayed. Replayed messages keep their original ids, and the client drops ids it has already seen within a 1024-id window per channel; gaps and duplicates beyond it remain possible. The recovery event does not signal that replay has finished.
+On success the state becomes `connected`, then `on_recovery` fires. Subscriptions and presence interests are restored first, then the publishes that waited through the outage go out in call order; a publish the old connection was given is never resent. A pending presence query failed with `Transport`. The reconnect asks for a replay lookback covering the outage plus 5 s, and the `replay` claim your endpoint signs decides what is replayed. Replayed messages keep their original ids, and the client drops ids it has already seen within a 1024-id window per channel; gaps and duplicates beyond it remain possible. The recovery event does not signal that replay has finished.
 
 ## Delivery semantics, honestly
 
@@ -381,7 +383,7 @@ On success the state becomes `connected`, then `on_recovery` fires. Subscription
 - Lost connections retry automatically. Recovery restores your subscriptions and reports **possible gaps and duplicates**.
 - A `RateLimitError` never names the command it dropped, so the client pauses and resends what it sent in the last two seconds: subscriptions first, as their current state, then up to the last 64 publishes, each at most once and with its original id. After eight limits in a row it treats the limit as a used-up quota: it stops resending, and re-sends the subscriptions it dropped on a slow probe until commands go two seconds without a limit. Resends count toward usage.
 - Subscriptions and publishes wait for room when the writer is full instead of failing. A subscription change goes out ahead of publishes, but never ahead of a publish to its own segment that was queued before it.
-- No offline queue, no durable history, no global ordering.
+- A publish made while reconnecting waits and is sent after the reconnect; waiting publishes are refused when recovery ends in `failed` or the channel closes. No durable history, no global ordering.
 
 ## Limits and defaults
 
@@ -407,7 +409,9 @@ Received messages are never size-checked: they are already in memory when they a
 
 ## asyncio, threads and cancellation
 
-Everything runs on the event loop that called `connect()`; use a channel from that loop's thread only. Cancellation is asyncio's own: cancelling the task awaiting `connect()` abandons the attempt and leaves the channel `failed`, cancelling an awaiting `publish()` withdraws a publish that has not gone out, and cancelling `presence_list()` frees the query slot. `CancelledError` propagates unchanged, so `asyncio.wait_for()` works as usual.
+Your code runs on the event loop that called `connect()`; use a channel from that loop's thread only. Each open connection has its own daemon thread with a private event loop that carries the socket: the handshake, reads, writes, and the `websockets` library's keepalive, which answers the server's pings and sends its own every 20 s. A listener that holds your loop, even with blocking code, therefore does not cost the connection: the server, which closes a connection it has not heard a ping or pong from for 60 s, keeps hearing from it. The thread reads the next frame only after your loop has delivered the previous one, so nothing piles up beyond the library's own bounded buffer of 16 frames; if more than that arrive while a listener blocks, the library stops reading, and a keepalive pong it cannot read for 20 s ends the connection, which then recovers like any drop. `close()` joins the thread, and a connection whose loop closes without `close()` ends its thread within a second.
+
+Cancellation is asyncio's own: cancelling the task awaiting `connect()` abandons the attempt and leaves the channel `failed`, cancelling an awaiting `publish()` withdraws a publish that has not gone out, and cancelling `presence_list()` frees the query slot. `CancelledError` propagates unchanged, so `asyncio.wait_for()` works as usual.
 
 Listeners are plain functions called synchronously, in registration order, as events arrive: a slow listener slows delivery rather than growing a queue. A listener that raises is contained and reported through `on_error`. `async def` listeners are refused with `ConfigurationError`; start a task from a plain listener instead, and keep a reference to it:
 

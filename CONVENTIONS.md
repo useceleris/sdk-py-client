@@ -12,6 +12,8 @@ Solve the problem in front of you with the simplest structure that stays readabl
 
 Two seams exist because Python needs them, and no others should appear: `_websocket.WebSocket`, a browser-style socket over the `websockets` library, so the connection logic matches the reference; and `Timers`, so tests can drive time.
 
+`_websocket.WebSocket` is also the only place that touches threads. Each socket runs its connection on its own daemon thread and event loop, so pings keep flowing while a listener holds the caller's loop (HEARTBEAT-01). Everything it reports runs on the caller's loop, handed over with `call_soon_threadsafe`, one event at a time: the thread reads the next frame only after the previous one was delivered (DEV-01). Its state shared with the thread sits behind one lock, and the thread is joined before `on_close` runs. No other module creates threads or touches another loop.
+
 ## Maintainability
 
 - Small modules with one responsibility; the file name states it. Modules are private (`_name.py`); `__init__.py` is the only place that re-exports, and the public surface is exactly its `__all__`.
@@ -26,6 +28,21 @@ Two seams exist because Python needs them, and no others should appear: `_websoc
 
 ## Layout
 
-Leave one blank line after every block (`if`, `for`, `while`, `with`, `try`, `match`) before the next statement, except before `elif`, `else`, `except` or `finally`, or at the end of an enclosing block. Code packed against the block before it is harder to read, and is treated as a defect in review.
+Leave one blank line after every compound statement (`if`, `for`, `while`, `with`, `try`, `match`, `def`, `class`) before the next statement in the same block. `elif`, `else`, `except` and `finally` belong to their statement, and the end of an enclosing block needs no blank line. Code packed against the block before it is harder to read.
 
-`ruff format` owns everything else about layout; `ruff check` and `mypy --strict` must pass.
+Every function, method and class ends with a marker comment that names it, as the first line after its body at the definition's own indentation: `# end function name` at module level or inside a function, `# end method name` inside a class, and `# end class Name`. `ruff format` puts blank lines before the marker; nothing else may come between. Ruff treats `end` as a task tag, so a marker may run past the line length.
+
+```python
+def outer(value: int) -> int:
+    def inner() -> int:
+        return value
+
+    # end function inner
+
+    return inner()
+
+
+# end function outer
+```
+
+`tests/test_layout.py` enforces both rules over `src`, `tests`, `examples` and `noxfile.py`, and names the file and line of each violation. `ruff format` owns everything else about layout; `ruff check` and `mypy --strict` must pass. `uv run nox` runs all of them, and CI runs `uv run --locked nox`.
