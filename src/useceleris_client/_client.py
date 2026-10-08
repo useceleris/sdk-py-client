@@ -41,6 +41,9 @@ class _ClientOptions(TypedDict):
     ]
 
 
+# end class _ClientOptions
+
+
 _CLIENT_OPTIONS = TypeAdapter(_ClientOptions)
 
 
@@ -82,6 +85,8 @@ class Client:
         self._options = options
         self._credential_provider = credential_provider
 
+    # end method __init__
+
     def channel(self, reference: str) -> Channel:
         """Side-effect free: each call is a new channel, and a new socket once
         connected."""
@@ -113,6 +118,11 @@ class Client:
             )
         )
 
+    # end method channel
+
+
+# end class Client
+
 
 def create_client(
     *,
@@ -141,3 +151,6 @@ def create_client(
         deduplication_window_size=deduplication_window_size,
         maximum_reconnect_attempts=maximum_reconnect_attempts,
     )
+
+
+# end function create_client

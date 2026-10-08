@@ -22,6 +22,9 @@ def validate_input(
     raise ConfigurationError(description)
 
 
+# end function validate_input
+
+
 def describe_parse_error(subject: str, error: ValidationError) -> str:
     """Names every field that failed and the rule it broke. Pydantic's messages
     for the rules used here state the expected type, format or bound, never
@@ -38,6 +41,9 @@ def describe_parse_error(subject: str, error: ValidationError) -> str:
     return f"Invalid {subject}. {' '.join(failures)}"
 
 
+# end function describe_parse_error
+
+
 def _describe_path(location: tuple[int | str, ...]) -> str:
     path = ""
 
@@ -48,3 +54,6 @@ def _describe_path(location: tuple[int | str, ...]) -> str:
             path += f".{key}" if path else key
 
     return path
+
+
+# end function _describe_path

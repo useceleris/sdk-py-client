@@ -28,6 +28,9 @@ def _check_identifier(value: str) -> str:
     return value
 
 
+# end function _check_identifier
+
+
 Identifier: TypeAlias = Annotated[str, AfterValidator(_check_identifier)]
 
 IDENTIFIER = TypeAdapter(Identifier)
@@ -40,9 +43,15 @@ class PublishCommand(TypedDict):
     payload: bytes
 
 
+# end class PublishCommand
+
+
 class InterestCommand(TypedDict):
     command: Literal["SUB", "UNSUB", "PRES_SUB", "PRES_UNSUB"]
     segment_id: Identifier
+
+
+# end class InterestCommand
 
 
 class PresenceListCommand(TypedDict):
@@ -53,11 +62,17 @@ class PresenceListCommand(TypedDict):
     request_id: Identifier
 
 
+# end class PresenceListCommand
+
+
 ClientCommand: TypeAlias = PublishCommand | InterestCommand | PresenceListCommand
 
 
 class _CommandEnvelope(TypedDict):
     command: Literal["PUB", "SUB", "UNSUB", "PRES_SUB", "PRES_UNSUB", "PRES_LIST"]
+
+
+# end class _CommandEnvelope
 
 
 # The command name is checked on its own first, so a failure in one command's
@@ -82,3 +97,6 @@ def parse_client_command(command: object) -> ClientCommand:
         return validate_input(_PRESENCE_LIST_COMMAND, command, "command")
 
     return validate_input(_INTEREST_COMMAND, command, "command")
+
+
+# end function parse_client_command

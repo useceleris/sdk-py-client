@@ -27,6 +27,9 @@ class SegmentDelegates:
     query_presence: Callable[[str, int, int], Awaitable[PresencePage]]
 
 
+# end class SegmentDelegates
+
+
 class Segment:
     """A stateless proxy over its channel's single connection.
 
@@ -39,25 +42,38 @@ class Segment:
         self._segment_id = segment_id
         self._delegates = delegates
 
+    # end method __init__
+
     @property
     def segment_id(self) -> str:
         return self._segment_id
 
+    # end method segment_id
+
     def subscribe(self) -> Subscription:
         return self._delegates.add_message_interest(self._segment_id)
+
+    # end method subscribe
 
     def on_message(
         self, listener: Callable[[bytes, MessageMetadata], None]
     ) -> Callable[[], None]:
         return self._delegates.add_message_listener(self._segment_id, listener)
 
+    # end method on_message
+
     async def publish(self, payload: bytes, *, message_id: str | None = None) -> None:
         """Returns on local acceptance: once the socket has taken the command.
-        An id is generated when none is given."""
+        While reconnecting, that is the new socket (QUEUE-01). An id is
+        generated when none is given."""
         await self._delegates.publish_to_segment(self._segment_id, payload, message_id)
+
+    # end method publish
 
     def subscribe_presence(self) -> Subscription:
         return self._delegates.add_presence_interest(self._segment_id)
+
+    # end method subscribe_presence
 
     def on_presence(
         self, listener: Callable[[PresenceEvent], None]
@@ -66,7 +82,14 @@ class Segment:
         # fans them out to presence subscribers alone (PRES-01).
         return self._delegates.add_presence_listener(self._segment_id, listener)
 
+    # end method on_presence
+
     async def presence_list(self, *, page: int, per_page: int) -> PresencePage:
         """One query in flight per channel; the request id is issued
         internally."""
         return await self._delegates.query_presence(self._segment_id, page, per_page)
+
+    # end method presence_list
+
+
+# end class Segment

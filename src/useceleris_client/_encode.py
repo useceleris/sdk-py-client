@@ -13,6 +13,9 @@ def encode_client_command(command: ClientCommand) -> bytes:
     return _CommandEncoder().encode(parse_client_command(command))
 
 
+# end function encode_client_command
+
+
 def _command_too_large() -> ConfigurationError:
     return ConfigurationError(
         "Encoded command exceeds 2 MiB. That is the most the server accepts on "
@@ -20,9 +23,14 @@ def _command_too_large() -> ConfigurationError:
     )
 
 
+# end function _command_too_large
+
+
 class _CommandEncoder:
     def __init__(self) -> None:
         self._encoded = bytearray()
+
+    # end method __init__
 
     def encode(self, command: ClientCommand) -> bytes:
         if command["command"] == "PUB":
@@ -33,6 +41,8 @@ class _CommandEncoder:
             self._write_segment_command(command)
 
         return bytes(self._encoded)
+
+    # end method encode
 
     def _write_publish_command(self, command: PublishCommand) -> None:
         self._append_text("@PUB\n")
@@ -45,15 +55,21 @@ class _CommandEncoder:
 
         self._append_bulk(command["payload"])
 
+    # end method _write_publish_command
+
     def _write_presence_list_command(self, command: PresenceListCommand) -> None:
         self._append_text("@PRES_LIST\n")
         self._append_bulk(command["segment_id"])
         self._append_text(f";{command['page']}\n;{command['per_page']}\n")
         self._append_bulk(command["request_id"])
 
+    # end method _write_presence_list_command
+
     def _write_segment_command(self, command: InterestCommand) -> None:
         self._append_text(f"@{command['command']}\n")
         self._append_bulk(command["segment_id"])
+
+    # end method _write_segment_command
 
     def _append(self, data: bytes) -> None:
         if len(self._encoded) + len(data) > MAXIMUM_COMMAND_BYTES:
@@ -61,12 +77,16 @@ class _CommandEncoder:
 
         self._encoded += data
 
+    # end method _append
+
     def _append_text(self, text: str) -> None:
         # UTF-8 cannot be shorter than the code point count.
         if len(text) > MAXIMUM_COMMAND_BYTES:
             raise _command_too_large()
 
         self._append(text.encode())
+
+    # end method _append_text
 
     def _append_bulk(self, value: str | bytes) -> None:
         if len(value) > MAXIMUM_COMMAND_BYTES:
@@ -76,3 +96,8 @@ class _CommandEncoder:
         self._append_text(f"${len(data)}\n")
         self._append(data)
         self._append_text("\n")
+
+    # end method _append_bulk
+
+
+# end class _CommandEncoder

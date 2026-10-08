@@ -26,6 +26,9 @@ def text_payload(value: str) -> bytes:
     )
 
 
+# end function text_payload
+
+
 def json_payload(value: object) -> bytes:
     serialized: str | None
 
@@ -51,6 +54,9 @@ def json_payload(value: object) -> bytes:
     )
 
 
+# end function json_payload
+
+
 def read_text(payload: bytes) -> str:
     with contextlib.suppress(UnicodeDecodeError):
         return payload.decode()
@@ -60,8 +66,14 @@ def read_text(payload: bytes) -> str:
     )
 
 
+# end function read_text
+
+
 def _reject_constant(constant: str) -> Any:
     raise ValueError("Not JSON")
+
+
+# end function _reject_constant
 
 
 # Returns Any: a payload from a peer you do not control should be checked
@@ -78,10 +90,16 @@ def read_json(payload: bytes) -> Any:
     raise ConfigurationError("Payload is valid UTF-8 but not valid JSON.")
 
 
+# end function read_json
+
+
 @dataclass(frozen=True)
 class PayloadCodec(Generic[Value]):
     encode_payload: Callable[[Value], bytes]
     read_payload: Callable[[bytes], Value]
+
+
+# end class PayloadCodec
 
 
 # Bring your own serializer: protobuf, MessagePack, CBOR, Avro, anything.
@@ -94,3 +112,6 @@ def create_payload_codec(
         raise ConfigurationError("Codec must provide encode and decode functions.")
 
     return PayloadCodec(encode_payload=encode, read_payload=decode)
+
+
+# end function create_payload_codec

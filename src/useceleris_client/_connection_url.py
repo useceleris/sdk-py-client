@@ -48,6 +48,9 @@ def validate_base_url(base_url: str, allow_insecure_loopback: bool) -> SplitResu
     return url
 
 
+# end function validate_base_url
+
+
 def _is_loopback(hostname: str) -> bool:
     if hostname == "localhost":
         return True
@@ -56,6 +59,9 @@ def _is_loopback(hostname: str) -> bool:
         return ipaddress.ip_address(hostname).is_loopback
     except ValueError:
         return False
+
+
+# end function _is_loopback
 
 
 def create_credential_url(
@@ -67,3 +73,6 @@ def create_credential_url(
     )
 
     return urlunsplit((base_url.scheme, base_url.netloc, path, query, ""))
+
+
+# end function create_credential_url

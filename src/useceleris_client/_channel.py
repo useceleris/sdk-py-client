@@ -65,6 +65,9 @@ class MessageMetadata:
     timestamp: int
 
 
+# end class MessageMetadata
+
+
 # Payload first so decoding composes; everything else arrives beside it.
 MessageListener: TypeAlias = Callable[[bytes, MessageMetadata], None]
 
@@ -73,6 +76,9 @@ MessageListener: TypeAlias = Callable[[bytes, MessageMetadata], None]
 class ServerNotice:
     timestamp: int
     payload: bytes
+
+
+# end class ServerNotice
 
 
 @dataclass(frozen=True)
@@ -85,6 +91,9 @@ class PresencePage:
     from_: int
     to: int
     connections: tuple[PresenceConnection, ...]
+
+
+# end class PresencePage
 
 
 @dataclass(frozen=True)
@@ -101,11 +110,17 @@ class PresenceEvent:
     timestamp: int
 
 
+# end class PresenceEvent
+
+
 @dataclass(frozen=True)
 class RecoveryEvent:
     retry_index: int
     possible_gaps: Literal[True] = True
     possible_duplicates: Literal[True] = True
+
+
+# end class RecoveryEvent
 
 
 class Subscription:
@@ -115,6 +130,8 @@ class Subscription:
         self._release = release
         self._cancelled = False
 
+    # end method __init__
+
     def cancel(self) -> None:
         """Idempotent."""
         if self._cancelled:
@@ -122,6 +139,11 @@ class Subscription:
 
         self._cancelled = True
         self._release()
+
+    # end method cancel
+
+
+# end class Subscription
 
 
 Listener = ParamSpec("Listener")
@@ -132,6 +154,11 @@ class _ListenerEntry(Generic[Listener]):
     def __init__(self, callback: Callable[Listener, object]) -> None:
         self.callback = callback
 
+    # end method __init__
+
+
+# end class _ListenerEntry
+
 
 class _ListenerSet(Generic[Listener]):
     """Synchronous dispatch with no queue (DEV-01): a slow listener blocks
@@ -140,6 +167,8 @@ class _ListenerSet(Generic[Listener]):
     def __init__(self, contain_failure: Callable[[], None]) -> None:
         self._contain_failure = contain_failure
         self._entries: list[_ListenerEntry[Listener]] = []
+
+    # end method __init__
 
     def add(self, callback: Callable[Listener, object]) -> Callable[[], None]:
         # A coroutine function's call would only create a coroutine that never
@@ -157,7 +186,11 @@ class _ListenerSet(Generic[Listener]):
             if entry in self._entries:
                 self._entries.remove(entry)
 
+        # end function dispose
+
         return dispose
+
+    # end method add
 
     def dispatch(self, *values: Listener.args, **named: Listener.kwargs) -> None:
         # A snapshot, so listeners added during dispatch wait for the next
@@ -181,6 +214,11 @@ class _ListenerSet(Generic[Listener]):
                 outcome.close()
                 self._contain_failure()
 
+    # end method dispatch
+
+
+# end class _ListenerSet
+
 
 class ChannelEventHandler:
     """Channel-level events. Each registration returns a disposer that removes
@@ -200,24 +238,39 @@ class ChannelEventHandler:
         self._error_listeners = error_listeners
         self._message_listeners = message_listeners
 
+    # end method __init__
+
     def on_state_change(
         self, listener: Callable[[ChannelState], None]
     ) -> Callable[[], None]:
         return self._state_listeners.add(listener)
+
+    # end method on_state_change
 
     def on_recovery(
         self, listener: Callable[[RecoveryEvent], None]
     ) -> Callable[[], None]:
         return self._recovery_listeners.add(listener)
 
+    # end method on_recovery
+
     def on_notice(self, listener: Callable[[ServerNotice], None]) -> Callable[[], None]:
         return self._notice_listeners.add(listener)
+
+    # end method on_notice
 
     def on_error(self, listener: Callable[[ChannelError], None]) -> Callable[[], None]:
         return self._error_listeners.add(listener)
 
+    # end method on_error
+
     def on_message(self, listener: MessageListener) -> Callable[[], None]:
         return self._message_listeners.add(listener)
+
+    # end method on_message
+
+
+# end class ChannelEventHandler
 
 
 @dataclass(frozen=True)
@@ -239,10 +292,16 @@ class ChannelInternals:
     timers: Timers
 
 
+# end class ChannelInternals
+
+
 @dataclass(frozen=True)
 class _Outage:
     disconnected_at: int
     started_monotonic: float
+
+
+# end class _Outage
 
 
 @dataclass(frozen=True)
@@ -252,11 +311,16 @@ class _PendingPresenceQuery:
     timer: Timer
 
 
+# end class _PendingPresenceQuery
+
+
 class _DedupWindow:
     def __init__(self, window_size: int) -> None:
         self._window_size = window_size
         # Insertion-ordered, so the first key is the oldest.
         self._identifiers: dict[str, None] = {}
+
+    # end method __init__
 
     def record_if_new(self, identifier: str) -> bool:
         """False for an identifier already in the window. A new one is
@@ -271,8 +335,15 @@ class _DedupWindow:
 
         return True
 
+    # end method record_if_new
+
     def clear(self) -> None:
         self._identifiers.clear()
+
+    # end method clear
+
+
+# end class _DedupWindow
 
 
 class Channel:
@@ -349,21 +420,31 @@ class Channel:
             query_presence=self._query_presence,
         )
 
+    # end method __init__
+
     @property
     def state(self) -> ChannelState:
         return self._state
 
+    # end method state
+
     def events(self) -> ChannelEventHandler:
         return self._handler
+
+    # end method events
 
     def segment(self, segment_id: str) -> Segment:
         """Side-effect free: a proxy over this channel's connection."""
         validate_input(IDENTIFIER, segment_id, "segment ID")
         return Segment(segment_id, self._segment_delegates)
 
+    # end method segment
+
     def default_segment(self) -> Segment:
         """The segment every connection joins automatically (SEG-01)."""
         return self.segment(DEFAULT_SEGMENT_ID)
+
+    # end method default_segment
 
     async def connect(self) -> None:
         """Returns once the socket is open. Cancelling the caller abandons the
@@ -399,6 +480,8 @@ class Channel:
         if generation == self._generation:
             self._set_state("connected")
 
+    # end method connect
+
     async def close(self) -> None:
         """Idempotent and terminal. Every call waits for the same close."""
         if self._closed is None:
@@ -406,6 +489,8 @@ class Channel:
             self._begin_close()
 
         await asyncio.shield(self._closed)
+
+    # end method close
 
     def _begin_close(self) -> None:
         self._reject_pending_presence_query(
@@ -436,6 +521,8 @@ class Channel:
                 CLOSE_BUDGET_MS, self._finish_close
             )
 
+    # end method _begin_close
+
     def _finish_close(self) -> None:
         if self._state == "closed":
             return
@@ -449,6 +536,8 @@ class Channel:
         if self._closed is not None and not self._closed.done():
             self._closed.set_result(None)
 
+    # end method _finish_close
+
     def _cancel_attempt(self) -> None:
         if (
             self._attempt_cancellation is not None
@@ -458,6 +547,8 @@ class Channel:
 
         self._attempt_cancellation = None
 
+    # end method _cancel_attempt
+
     # Detach the socket reference before acting on it so no event delivered
     # during the follow-up can re-enter through a stale handle.
     def _detach_handle(self) -> ConnectionHandle | None:
@@ -465,11 +556,18 @@ class Channel:
         self._handle = None
         return handle
 
+    # end method _detach_handle
+
     async def _establish_connection(self, recovery: Recovery) -> None:
         """Opens the WebSocket, installs it, and re-sends every subscription."""
         generation = self._generation
         cancellation: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._attempt_cancellation = cancellation
+
+        if recovery["reason"] == "reconnect":
+            timeout_ms = self._internals.reconnect_timeout_ms
+        else:
+            timeout_ms = self._internals.connect_timeout_ms
 
         try:
             handle = await open_connection(
@@ -483,11 +581,7 @@ class Channel:
                 on_message=lambda message: self._route_message(generation, message),
                 on_close=lambda: self._receive_socket_close(generation),
                 on_error=lambda error: self._receive_socket_error(generation, error),
-                timeout_ms=(
-                    self._internals.reconnect_timeout_ms
-                    if recovery["reason"] == "reconnect"
-                    else self._internals.connect_timeout_ms
-                ),
+                timeout_ms=timeout_ms,
                 timers=self._internals.timers,
                 cancellation=cancellation,
             )
@@ -526,6 +620,8 @@ class Channel:
             if self._attempt_cancellation is cancellation:
                 self._attempt_cancellation = None
 
+    # end method _establish_connection
+
     def _add_message_listener(
         self, segment_id: str, listener: Callable[[bytes, MessageMetadata], None]
     ) -> Callable[[], None]:
@@ -537,6 +633,8 @@ class Channel:
 
         return listeners.add(listener)
 
+    # end method _add_message_listener
+
     def _add_presence_listener(
         self, segment_id: str, listener: Callable[[PresenceEvent], None]
     ) -> Callable[[], None]:
@@ -547,6 +645,8 @@ class Channel:
             self._presence_listeners[segment_id] = listeners
 
         return listeners.add(listener)
+
+    # end method _add_presence_listener
 
     # Ref-counts one interest; the first registration and the last
     # cancellation queue a sync of that segment's subscription.
@@ -576,13 +676,19 @@ class Channel:
             interests.pop(segment_id, None)
             self._queue_interest_sync(kind, segment_id)
 
+        # end function release
+
         return Subscription(release)
+
+    # end method _add_interest
 
     # Without a socket there is nothing to sync: installing one syncs every
     # held interest.
     def _queue_interest_sync(self, kind: InterestKind, segment_id: str) -> None:
         if self._handle is not None:
             self._command_queue.queue_interest(kind, segment_id)
+
+    # end method _queue_interest_sync
 
     # The command that brings the server in line with the segment's interest
     # as it stands now. Subscriptions are synced as state, so a resend is
@@ -612,6 +718,8 @@ class Channel:
             "segment_id": segment_id,
         }
 
+    # end method _interest_command
+
     # The server's view of this connection's subscriptions is now unknown, so
     # the socket is replaced: reconnecting re-sends every subscription.
     def _receive_interest_write_failure(self) -> None:
@@ -622,6 +730,8 @@ class Channel:
 
         if handle is not None:
             handle.close()
+
+    # end method _receive_interest_write_failure
 
     async def _query_presence(
         self, segment_id: str, page: int, per_page: int
@@ -684,6 +794,8 @@ class Channel:
 
             raise
 
+    # end method _query_presence
+
     def _take_pending_presence_query(self) -> _PendingPresenceQuery | None:
         pending = self._pending_presence_query
 
@@ -694,11 +806,15 @@ class Channel:
         pending.timer.cancel()
         return pending
 
+    # end method _take_pending_presence_query
+
     def _reject_pending_presence_query(self, error: ChannelError) -> None:
         pending = self._take_pending_presence_query()
 
         if pending is not None and not pending.answer.done():
             pending.answer.set_exception(error)
+
+    # end method _reject_pending_presence_query
 
     def _reject_presence_query_on_connection_loss(self) -> None:
         self._reject_pending_presence_query(
@@ -708,6 +824,8 @@ class Channel:
                 "channel reconnects.",
             )
         )
+
+    # end method _reject_presence_query_on_connection_loss
 
     async def _publish_to_segment(
         self, segment_id: str, payload: bytes, message_id: str | None
@@ -734,6 +852,8 @@ class Channel:
 
         await self._command_queue.publish(segment_id, data)
 
+    # end method _publish_to_segment
+
     # Restoration goes through the queue, so it waits for writer room and
     # reaches the server before any publish, messages first, then presence.
     def _flush_interests(self) -> None:
@@ -741,6 +861,8 @@ class Channel:
             [("message", segment_id) for segment_id in self._message_interests]
             + [("presence", segment_id) for segment_id in self._presence_interests]
         )
+
+    # end method _flush_interests
 
     def _route_message(self, attempt_generation: int, message: ServerMessage) -> None:
         if attempt_generation != self._generation:
@@ -764,6 +886,8 @@ class Channel:
                 self._receive_presence_response(message)
             case _:
                 return
+
+    # end method _route_message
 
     def _receive_error_frame(self, frame: ErrorFrame) -> None:
         # The server never closes the socket on an error frame; report it
@@ -793,6 +917,8 @@ class Channel:
 
         self._emit_error(error)
 
+    # end method _receive_error_frame
+
     def _receive_presence_response(self, response: PresenceListFrame) -> None:
         pending = self._pending_presence_query
 
@@ -816,6 +942,8 @@ class Channel:
                     connections=response.connections,
                 )
             )
+
+    # end method _receive_presence_response
 
     def _deliver_message(self, message: MessageFrame) -> None:
         # REV-01: every MSG carries an id, the publisher's or one the server
@@ -848,6 +976,8 @@ class Channel:
 
         self._channel_message_listeners.dispatch(message.payload, metadata)
 
+    # end method _deliver_message
+
     def _deliver_presence(self, event: PresenceNotifyFrame) -> None:
         listeners = self._presence_listeners.get(event.segment_id)
 
@@ -864,6 +994,8 @@ class Channel:
             )
         )
 
+    # end method _deliver_presence
+
     def _receive_socket_close(self, attempt_generation: int) -> None:
         if self._state == "closing":
             self._finish_close()
@@ -873,6 +1005,8 @@ class Channel:
             return
 
         self._enter_reconnecting()
+
+    # end method _receive_socket_close
 
     def _receive_socket_error(
         self,
@@ -892,6 +1026,8 @@ class Channel:
 
         self._enter_reconnecting()
 
+    # end method _receive_socket_error
+
     def _enter_reconnecting(self) -> None:
         self._reject_presence_query_on_connection_loss()
         self._command_queue.reset_connection_state()
@@ -907,6 +1043,8 @@ class Channel:
         self._set_state("reconnecting")
         self._schedule_retry()
 
+    # end method _enter_reconnecting
+
     def _schedule_retry(self) -> None:
         generation = self._generation
         delay = compute_retry_delay_ms(self._retries_used, self._internals.random)
@@ -921,7 +1059,11 @@ class Channel:
                 self._run_reconnect_attempt(generation)
             )
 
+        # end function retry
+
         self._retry_timer = self._internals.timers.call_later(delay, retry)
+
+    # end method _schedule_retry
 
     # The attempt starts a loop iteration after its timer fired, so it checks
     # the timer's generation: a close in between ends it before it begins.
@@ -960,15 +1102,18 @@ class Channel:
                 self._schedule_retry()
                 return
 
-            self._fail_terminal(
-                error
-                if isinstance(
-                    error, (ConfigurationError, CelerisConnectionError, ProtocolError)
+            if isinstance(
+                error, (ConfigurationError, CelerisConnectionError, ProtocolError)
+            ):
+                self._fail_terminal(error)
+            else:
+                self._fail_terminal(
+                    CelerisConnectionError(
+                        "Transport",
+                        "Reconnect attempt failed with an unexpected error.",
+                    )
                 )
-                else CelerisConnectionError(
-                    "Transport", "Reconnect attempt failed with an unexpected error."
-                )
-            )
+
             return
 
         if generation != self._generation:
@@ -976,6 +1121,8 @@ class Channel:
 
         self._set_state("connected")
         self._recovery_listeners.dispatch(RecoveryEvent(retry_index=attempt_index))
+
+    # end method _run_reconnect_attempt
 
     # Waiting publishes fail with the error on_error reports (QUEUE-01).
     def _fail_terminal(self, error: ChannelError) -> None:
@@ -986,14 +1133,20 @@ class Channel:
         self._emit_error(error)
         self._set_state("failed")
 
+    # end method _fail_terminal
+
     def _clear_retry_timer(self) -> None:
         if self._retry_timer is not None:
             self._retry_timer.cancel()
             self._retry_timer = None
 
+    # end method _clear_retry_timer
+
     def _set_state(self, state: ChannelState) -> None:
         self._state = state
         self._state_listeners.dispatch(state)
+
+    # end method _set_state
 
     def _report_listener_failure(self) -> None:
         self._emit_error(
@@ -1003,6 +1156,8 @@ class Channel:
                 "kept running.",
             )
         )
+
+    # end method _report_listener_failure
 
     def _emit_error(self, error: ChannelError) -> None:
         if self._dispatching_errors:
@@ -1014,3 +1169,8 @@ class Channel:
             self._error_listeners.dispatch(error)
         finally:
             self._dispatching_errors = False
+
+    # end method _emit_error
+
+
+# end class Channel

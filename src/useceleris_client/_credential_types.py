@@ -10,6 +10,9 @@ class Credentials:
     signature: str = field(repr=False)
 
 
+# end class Credentials
+
+
 @dataclass(frozen=True)
 class CredentialRequest:
     channel_reference: str
@@ -18,6 +21,9 @@ class CredentialRequest:
     # and how far back the new connection should replay.
     disconnected_at: int | None = None
     replay_lookback_ms: int | None = None
+
+
+# end class CredentialRequest
 
 
 # Called once per connection attempt, so credentials are always fresh

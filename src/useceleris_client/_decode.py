@@ -39,6 +39,8 @@ class MessageDecoder:
         self._offset = 0
         self._fragments = 0
 
+    # end method __init__
+
     def decode(self) -> ServerMessage:
         message = self._read_message(0, True)
 
@@ -48,6 +50,8 @@ class MessageDecoder:
             )
 
         return message
+
+    # end method decode
 
     # Returns the marker as a one-byte bytes object, so callers match it
     # against the protocol character itself.
@@ -67,6 +71,8 @@ class MessageDecoder:
 
         self._offset += 1
         return self._bytes[field_start_offset : self._offset]
+
+    # end method _read_marker
 
     def _read_line(
         self, field: str, field_start_offset: int, maximum_length: int | None = None
@@ -105,6 +111,8 @@ class MessageDecoder:
 
         return self._bytes[line_start:content_end]
 
+    # end method _read_line
+
     def _read_text(self, data: bytes, field: str, field_start_offset: int) -> str:
         with contextlib.suppress(UnicodeDecodeError):
             return data.decode()
@@ -112,6 +120,8 @@ class MessageDecoder:
         # Raised once the decode error, which holds the received bytes, is
         # suppressed, so it is not chained to this one.
         raise ProtocolError("Invalid UTF-8 text.", field, field_start_offset)
+
+    # end method _read_text
 
     # The decimal grammar every numeric field shares. The range defaults to
     # signed 64-bit, which also bounds bulk and array lengths.
@@ -143,6 +153,8 @@ class MessageDecoder:
 
         return value
 
+    # end method _read_decimal
+
     def _read_integer64(self, field: str) -> int:
         field_start_offset = self._offset
 
@@ -150,6 +162,8 @@ class MessageDecoder:
             raise ProtocolError("Expected Integer64 marker.", field, field_start_offset)
 
         return self._read_decimal(field, field_start_offset)
+
+    # end method _read_integer64
 
     def _read_integer32(self, field: str) -> int:
         field_start_offset = self._offset
@@ -159,6 +173,8 @@ class MessageDecoder:
 
         return self._read_integer32_digits(field, field_start_offset)
 
+    # end method _read_integer32
+
     def _read_integer32_digits(self, field: str, field_start_offset: int) -> int:
         return self._read_decimal(
             field,
@@ -167,6 +183,8 @@ class MessageDecoder:
             MINIMUM_INTEGER32,
             MAXIMUM_INTEGER32,
         )
+
+    # end method _read_integer32_digits
 
     def _read_bytes(self, field: str) -> bytes | None:
         field_start_offset = self._offset
@@ -180,6 +198,8 @@ class MessageDecoder:
                 raise ProtocolError(
                     "Expected simple or bulk byte marker.", field, field_start_offset
                 )
+
+    # end method _read_bytes
 
     def _read_bulk_bytes(self, field: str, field_start_offset: int) -> bytes | None:
         length = self._read_decimal(field, field_start_offset)
@@ -212,6 +232,8 @@ class MessageDecoder:
         self._offset += 1
         return result
 
+    # end method _read_bulk_bytes
+
     def _read_identifier(self, field: str) -> str:
         field_start_offset = self._offset
         text = self._read_nullable_identifier(field)
@@ -220,6 +242,8 @@ class MessageDecoder:
             raise ProtocolError("Identifier cannot be null.", field, field_start_offset)
 
         return text
+
+    # end method _read_identifier
 
     def _read_nullable_identifier(self, field: str) -> str | None:
         field_start_offset = self._offset
@@ -239,6 +263,8 @@ class MessageDecoder:
 
         return text
 
+    # end method _read_nullable_identifier
+
     def _read_payload(self, field: str = "payload") -> bytes:
         field_start_offset = self._offset
         payload = self._read_bytes(field)
@@ -247,6 +273,8 @@ class MessageDecoder:
             raise ProtocolError("Payload cannot be null.", field, field_start_offset)
 
         return payload
+
+    # end method _read_payload
 
     def _read_array_length(
         self, depth: int, field: str, marker_already_read: bool = False
@@ -279,6 +307,8 @@ class MessageDecoder:
 
         return length
 
+    # end method _read_array_length
+
     def _read_connections(self, depth: int) -> tuple[PresenceConnection, ...]:
         length = self._read_array_length(depth, "connections")
         connections: list[PresenceConnection] = []
@@ -303,6 +333,8 @@ class MessageDecoder:
 
         return tuple(connections)
 
+    # end method _read_connections
+
     def _read_message(self, depth: int, tail: bool) -> ServerMessage:
         field_start_offset = self._offset
 
@@ -318,6 +350,8 @@ class MessageDecoder:
                     "Unexpected server message marker.", "message", field_start_offset
                 )
 
+    # end method _read_message
+
     def _read_message_array(self, depth: int, tail: bool) -> ServerMessage:
         length = self._read_array_length(depth, "messages", True)
         messages = [
@@ -326,6 +360,8 @@ class MessageDecoder:
         ]
 
         return ArrayFrame(messages=tuple(messages))
+
+    # end method _read_message_array
 
     def _read_error_message(self, depth: int) -> ServerMessage:
         field_start_offset = self._offset - 1
@@ -345,6 +381,8 @@ class MessageDecoder:
             resource=self._read_resource(depth),
         )
 
+    # end method _read_error_message
+
     def _read_error_type(self) -> str:
         field_start_offset = self._offset
 
@@ -354,6 +392,8 @@ class MessageDecoder:
             )
 
         return self._read_error_name("error_type", field_start_offset)
+
+    # end method _read_error_type
 
     def _read_error_sub_type(self) -> str | None:
         field_start_offset = self._offset
@@ -375,6 +415,8 @@ class MessageDecoder:
             field_start_offset,
         )
 
+    # end method _read_error_sub_type
+
     # Error types and sub types are names such as PermissionDeniedError and
     # PRES_LIST: bounded, and restricted to letters, digits and underscores.
     def _read_error_name(self, field: str, field_start_offset: int) -> str:
@@ -388,6 +430,8 @@ class MessageDecoder:
             raise ProtocolError("Invalid error name.", field, field_start_offset)
 
         return name
+
+    # end method _read_error_name
 
     # Any single fragment the error's type and sub type define: null, a
     # string, an Integer64, an Integer32, or an array of these.
@@ -420,6 +464,8 @@ class MessageDecoder:
                     "Unexpected resource marker.", "resource", field_start_offset
                 )
 
+    # end method _read_resource
+
     def _read_command_message(self, depth: int, tail: bool) -> ServerMessage:
         field_start_offset = self._offset - 1
         command = self._read_text(
@@ -440,6 +486,8 @@ class MessageDecoder:
             case _:
                 return self._skip_unknown_command(depth, tail, field_start_offset)
 
+    # end method _read_command_message
+
     def _skip_unknown_command(
         self, depth: int, tail: bool, field_start_offset: int
     ) -> ServerMessage:
@@ -458,6 +506,8 @@ class MessageDecoder:
         self._offset = len(self._bytes)
         return IgnoredFrame()
 
+    # end method _skip_unknown_command
+
     def _read_peer_message(self) -> ServerMessage:
         return MessageFrame(
             token_reference=self._read_identifier("token_reference"),
@@ -467,10 +517,14 @@ class MessageDecoder:
             payload=self._read_payload(),
         )
 
+    # end method _read_peer_message
+
     def _read_server_notice(self) -> ServerMessage:
         return NoticeFrame(
             timestamp=self._read_integer64("timestamp"), payload=self._read_payload()
         )
+
+    # end method _read_server_notice
 
     def _read_presence_notification(self) -> ServerMessage:
         segment_id = self._read_identifier("segment_id")
@@ -492,6 +546,8 @@ class MessageDecoder:
             timestamp=self._read_integer64("timestamp"),
         )
 
+    # end method _read_presence_notification
+
     def _read_presence_response(self, depth: int) -> ServerMessage:
         return PresenceListFrame(
             segment_id=self._read_identifier("segment_id"),
@@ -504,6 +560,11 @@ class MessageDecoder:
             connections=self._read_connections(depth),
         )
 
+    # end method _read_presence_response
+
+
+# end class MessageDecoder
+
 
 # Test seam: production decodes through the connection's message callback;
 # the codec suites use this wrapper. It is not part of the package surface.
@@ -512,3 +573,6 @@ def decode_server_message(data: bytes) -> ServerMessage:
         raise ProtocolError("Expected byte buffer.", "message", 0)
 
     return MessageDecoder(data).decode()
+
+
+# end function decode_server_message

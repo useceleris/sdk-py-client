@@ -30,6 +30,9 @@ def _check_credential_value(value: str) -> str:
     return value
 
 
+# end function _check_credential_value
+
+
 def _check_channel_reference(value: str) -> str:
     if not value:
         raise PydanticCustomError("channel_reference", "Must not be empty")
@@ -49,11 +52,17 @@ def _check_channel_reference(value: str) -> str:
     return value
 
 
+# end function _check_channel_reference
+
+
 def _check_base_url(value: str) -> str:
     if not value:
         raise PydanticCustomError("base_url", "Must not be empty")
 
     return value
+
+
+# end function _check_base_url
 
 
 ChannelReference: TypeAlias = Annotated[str, AfterValidator(_check_channel_reference)]
@@ -66,6 +75,9 @@ BaseUrl: TypeAlias = Annotated[str, AfterValidator(_check_base_url)]
 class _CredentialFields(TypedDict):
     payload: Annotated[str, AfterValidator(_check_credential_value)]
     signature: Annotated[str, AfterValidator(_check_credential_value)]
+
+
+# end class _CredentialFields
 
 
 _CREDENTIAL_FIELDS = TypeAdapter(_CredentialFields)
@@ -85,14 +97,23 @@ def get_safe_parsed_credentials(credentials: object) -> Credentials:
     return Credentials(payload=fields["payload"], signature=fields["signature"])
 
 
+# end function get_safe_parsed_credentials
+
+
 class InitialRecovery(TypedDict):
     reason: Literal["initial"]
+
+
+# end class InitialRecovery
 
 
 class ReconnectRecovery(TypedDict):
     reason: Literal["reconnect"]
     disconnected_at: Annotated[int, Field(ge=0)]
     replay_lookback_ms: Annotated[int, Field(ge=0, le=REPLAY_LOOKBACK_CAP_MS)]
+
+
+# end class ReconnectRecovery
 
 
 Recovery: TypeAlias = Annotated[
@@ -107,6 +128,9 @@ class ConnectionConfiguration(TypedDict):
     recovery: NotRequired[Recovery]
 
 
+# end class ConnectionConfiguration
+
+
 CONNECTION_CONFIGURATION = TypeAdapter(ConnectionConfiguration)
 
 
@@ -116,3 +140,6 @@ def get_safe_parsed_connection_configuration(
     return validate_input(
         CONNECTION_CONFIGURATION, configuration, "connection configuration"
     )
+
+
+# end function get_safe_parsed_connection_configuration

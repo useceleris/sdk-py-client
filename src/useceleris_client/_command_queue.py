@@ -45,6 +45,9 @@ class CommandQueueDelegates:
     timers: Timers
 
 
+# end class CommandQueueDelegates
+
+
 @dataclass(eq=False)
 class _QueuedPublish:
     segment_id: str
@@ -56,6 +59,9 @@ class _QueuedPublish:
     resends: int = 0
 
 
+# end class _QueuedPublish
+
+
 @dataclass(frozen=True)
 class _SentInterest:
     kind: InterestKind
@@ -63,10 +69,16 @@ class _SentInterest:
     sent_at: float
 
 
+# end class _SentInterest
+
+
 @dataclass(frozen=True)
 class _SentPublish:
     publish: _QueuedPublish
     sent_at: float
+
+
+# end class _SentPublish
 
 
 def _settle(publish: _QueuedPublish, error: CelerisError | None = None) -> None:
@@ -77,6 +89,9 @@ def _settle(publish: _QueuedPublish, error: CelerisError | None = None) -> None:
         publish.sent.set_result(None)
     else:
         publish.sent.set_exception(error)
+
+
+# end function _settle
 
 
 class CommandQueue:
@@ -121,9 +136,13 @@ class CommandQueue:
         self._probe_count = 0
         self._first_sent_since_rate_limit_at: float | None = None
 
+    # end method __init__
+
     def queue_interest(self, kind: InterestKind, segment_id: str) -> None:
         self._mark_interest(kind, segment_id)
         self._drain()
+
+    # end method queue_interest
 
     async def publish(self, segment_id: str, data: bytes) -> None:
         """Returns once the publish is handed to the socket. Cancelling the
@@ -153,6 +172,8 @@ class CommandQueue:
 
             raise
 
+    # end method publish
+
     def send_now(self, handle: ConnectionHandle, data: bytes) -> None:
         """For commands that are never queued or resent, such as presence
         queries."""
@@ -174,6 +195,8 @@ class CommandQueue:
 
         if self._first_sent_since_rate_limit_at is None:
             self._first_sent_since_rate_limit_at = self._delegates.clock()
+
+    # end method send_now
 
     def receive_rate_limit(self) -> None:
         # A limit arriving while sending is paused, with nothing sent since
@@ -215,6 +238,8 @@ class CommandQueue:
 
         self._pause_timer = self._delegates.timers.call_later(delay, self._end_pause)
 
+    # end method receive_rate_limit
+
     def restore_interests(self, interests: list[tuple[InterestKind, str]]) -> None:
         """Restored subscriptions go ahead of every waiting publish, even one
         queued earlier to the same segment, so the connection is a member of its
@@ -225,6 +250,8 @@ class CommandQueue:
 
         self._drain()
 
+    # end method restore_interests
+
     def reset(self, error: CelerisError) -> None:
         """Waiting publishes fail with the error, and the socket state is
         cleared."""
@@ -234,6 +261,8 @@ class CommandQueue:
 
         for publish in publishes:
             _settle(publish, error)
+
+    # end method reset
 
     def reset_connection_state(self) -> None:
         """Nothing tied to the lost socket carries over: the next socket
@@ -258,15 +287,21 @@ class CommandQueue:
         self._pending_commands = 0
         self._first_sent_since_rate_limit_at = None
 
+    # end method reset_connection_state
+
     def _end_pause(self) -> None:
         self._pause_timer = None
         self._drain()
+
+    # end method _end_pause
 
     # A newer change takes a newer sequence, so the sync follows every publish
     # queued before it.
     def _mark_interest(self, kind: InterestKind, segment_id: str) -> None:
         self._sequence += 1
         self._pending_interests[kind][segment_id] = self._sequence
+
+    # end method _mark_interest
 
     def _requeue_recent(self, now: float) -> None:
         for sent_interest in self._recent_interests:
@@ -284,6 +319,8 @@ class CommandQueue:
                 resent.append(sent_publish.publish)
 
         self._publishes = resent + self._publishes
+
+    # end method _requeue_recent
 
     # Recent publishes are dropped; recent subscriptions wait for a probe.
     # Every subscription sent since the previous limit is handed to the probe,
@@ -307,10 +344,14 @@ class CommandQueue:
         self._probe_count += 1
         self._probe_timer = self._delegates.timers.call_later(delay, self._run_probe)
 
+    # end method _abandon_recent
+
     def _run_probe(self) -> None:
         self._probe_timer = None
         self._restore_abandoned()
         self._drain()
+
+    # end method _run_probe
 
     def _restore_abandoned(self) -> None:
         for kind in _INTEREST_KINDS:
@@ -318,6 +359,8 @@ class CommandQueue:
                 self._mark_interest(kind, segment_id)
 
             self._abandoned_interests[kind].clear()
+
+    # end method _restore_abandoned
 
     # Commands that went `quiet_span_ms` without a rate limit following them
     # mean the quota is back: abandoned subscriptions are restored at once.
@@ -336,6 +379,8 @@ class CommandQueue:
         self._probe_count = 0
         self._rate_limit_streak = 0
         self._restore_abandoned()
+
+    # end method _end_probing_if_quota_returned
 
     def _drain(self) -> None:
         handle = self._delegates.handle()
@@ -356,10 +401,13 @@ class CommandQueue:
 
                 continue
 
-            if not self._publishes or not self._send_publish(
-                handle, self._publishes[0]
-            ):
+            if not self._publishes:
                 return
+
+            if not self._send_publish(handle, self._publishes[0]):
+                return
+
+    # end method _drain
 
     # The first subscription change with no earlier publish to its segment
     # still queued: publishing joins the segment, so a change has to follow
@@ -376,6 +424,8 @@ class CommandQueue:
                     return kind, segment_id
 
         return None
+
+    # end method _next_ready_interest
 
     # False when draining has to stop.
     def _send_interest(
@@ -398,6 +448,8 @@ class CommandQueue:
         del self._pending_interests[kind][segment_id]
         return True
 
+    # end method _send_interest
+
     # False when draining has to stop. A publish the socket refuses fails
     # alone; ConnectionHandle.send raises nothing but SDK errors, such as
     # DeliveryUnknown.
@@ -416,6 +468,8 @@ class CommandQueue:
         self._record_sent_publish(publish)
         _settle(publish)
         return True
+
+    # end method _send_publish
 
     # False when the writer is full; a drain is then scheduled. Any other send
     # failure is raised for the caller to handle.
@@ -440,6 +494,8 @@ class CommandQueue:
 
         return True
 
+    # end method _write
+
     # No drain event exists: the command count resets whenever the buffer is
     # observed empty (documented approximation).
     def _has_room(self, handle: ConnectionHandle) -> bool:
@@ -447,6 +503,8 @@ class CommandQueue:
             self._pending_commands = 0
 
         return self._pending_commands < MAXIMUM_PENDING_COMMANDS
+
+    # end method _has_room
 
     def _record_sent_interest(self, kind: InterestKind, segment_id: str) -> None:
         now = self._delegates.clock()
@@ -459,6 +517,8 @@ class CommandQueue:
 
         self._recent_interests.append(_SentInterest(kind, segment_id, now))
 
+    # end method _record_sent_interest
+
     def _record_sent_publish(self, publish: _QueuedPublish) -> None:
         now = self._delegates.clock()
 
@@ -470,6 +530,8 @@ class CommandQueue:
 
         self._recent_publishes.append(_SentPublish(publish, now))
 
+    # end method _record_sent_publish
+
     def _schedule_drain(self) -> None:
         if self._drain_timer is not None:
             return
@@ -478,6 +540,13 @@ class CommandQueue:
             DRAIN_RETRY_MS, self._end_drain_wait
         )
 
+    # end method _schedule_drain
+
     def _end_drain_wait(self) -> None:
         self._drain_timer = None
         self._drain()
+
+    # end method _end_drain_wait
+
+
+# end class CommandQueue

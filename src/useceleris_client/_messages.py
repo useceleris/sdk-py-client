@@ -11,6 +11,9 @@ class PresenceConnection:
     timestamp: int
 
 
+# end class PresenceConnection
+
+
 # What the decoder produces from one server frame, one class per command.
 
 
@@ -25,12 +28,18 @@ class MessageFrame:
     payload: bytes
 
 
+# end class MessageFrame
+
+
 @dataclass(frozen=True)
 class NoticeFrame:
     """SERVER_MSG: untagged prose from the server."""
 
     timestamp: int
     payload: bytes
+
+
+# end class NoticeFrame
 
 
 @dataclass(frozen=True)
@@ -47,6 +56,9 @@ class PresenceListFrame:
     connections: tuple[PresenceConnection, ...]
 
 
+# end class PresenceListFrame
+
+
 @dataclass(frozen=True)
 class PresenceNotifyFrame:
     """PRES_NOTIFY: one connection joining or leaving one segment."""
@@ -56,6 +68,9 @@ class PresenceNotifyFrame:
     connection_id: str
     joined: bool
     timestamp: int
+
+
+# end class PresenceNotifyFrame
 
 
 @dataclass(frozen=True)
@@ -68,15 +83,24 @@ class ErrorFrame:
     resource: ServerErrorResource
 
 
+# end class ErrorFrame
+
+
 @dataclass(frozen=True)
 class ArrayFrame:
     messages: tuple["ServerMessage", ...]
+
+
+# end class ArrayFrame
 
 
 @dataclass(frozen=True)
 class IgnoredFrame:
     """A command this version does not know. Skipped, never surfaced
     (DECODE-01)."""
+
+
+# end class IgnoredFrame
 
 
 ServerMessage: TypeAlias = (

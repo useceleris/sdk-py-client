@@ -37,10 +37,20 @@ class CelerisError(Exception):
         self.code = code
         self.message = message
 
+    # end method __init__
+
+
+# end class CelerisError
+
 
 class ConfigurationError(CelerisError):
     def __init__(self, message: str = "Invalid client command.") -> None:
         super().__init__("Configuration", message)
+
+    # end method __init__
+
+
+# end class ConfigurationError
 
 
 class ProtocolError(CelerisError):
@@ -53,6 +63,11 @@ class ProtocolError(CelerisError):
         self.field = field
         self.offset = offset
 
+    # end method __init__
+
+
+# end class ProtocolError
+
 
 class CelerisConnectionError(CelerisError):
     # Prefixed so it does not shadow the built-in ConnectionError.
@@ -60,6 +75,11 @@ class CelerisConnectionError(CelerisError):
 
     def __init__(self, code: ConnectionErrorCode, message: str) -> None:
         super().__init__(code, message)
+
+    # end method __init__
+
+
+# end class CelerisConnectionError
 
 
 class ServerError(CelerisError):
@@ -77,3 +97,8 @@ class ServerError(CelerisError):
         self.type = type
         self.sub_type = sub_type
         self.resource = resource
+
+    # end method __init__
+
+
+# end class ServerError

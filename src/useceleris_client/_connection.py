@@ -34,13 +34,19 @@ class ConnectionHandle:
         self._remove_data_listeners = remove_data_listeners
         self._closed = False
 
+    # end method __init__
+
     @property
     def is_open(self) -> bool:
         return not self._closed and self._socket.ready_state == WebSocket.OPEN
 
+    # end method is_open
+
     @property
     def buffered_amount(self) -> int:
         return self._socket.buffered_amount
+
+    # end method buffered_amount
 
     def send(self, data: bytes) -> None:
         if not self.is_open:
@@ -73,6 +79,8 @@ class ConnectionHandle:
             "or may not have been sent.",
         )
 
+    # end method send
+
     def close(self) -> None:
         if self._closed:
             return
@@ -86,6 +94,11 @@ class ConnectionHandle:
         if self._socket.ready_state not in (WebSocket.CLOSING, WebSocket.CLOSED):
             with contextlib.suppress(Exception):
                 self._socket.close()
+
+    # end method close
+
+
+# end class ConnectionHandle
 
 
 async def open_connection(
@@ -133,6 +146,8 @@ async def open_connection(
             socket.on_error = None
             socket.on_close = None
 
+    # end function remove_attempt_listeners
+
     def fail(error: ConfigurationError | CelerisConnectionError) -> None:
         nonlocal settled
 
@@ -154,8 +169,12 @@ async def open_connection(
         if not opened.done():
             opened.set_exception(error)
 
+    # end function fail
+
     def cancel(_: object = None) -> None:
         fail(CelerisConnectionError("Cancelled", "Connection attempt cancelled."))
+
+    # end function cancel
 
     def handshake_failed() -> None:
         fail(
@@ -166,6 +185,8 @@ async def open_connection(
                 "the channel reference.",
             )
         )
+
+    # end function handshake_failed
 
     def socket_opened() -> None:
         nonlocal settled
@@ -182,6 +203,8 @@ async def open_connection(
         settled = True
         remove_attempt_listeners()
         opened.set_result(_create_handle(socket, on_message, on_close, on_error))
+
+    # end function socket_opened
 
     async def request_credentials_and_open_socket() -> None:
         nonlocal socket
@@ -227,6 +250,8 @@ async def open_connection(
         socket.on_error = handshake_failed
         socket.on_close = handshake_failed
 
+    # end function request_credentials_and_open_socket
+
     deadline = timers.call_later(
         timeout_ms,
         lambda: fail(
@@ -258,6 +283,9 @@ async def open_connection(
         raise
 
 
+# end function open_connection
+
+
 def _credential_request(
     channel_reference: str, recovery: Recovery | None
 ) -> CredentialRequest:
@@ -272,6 +300,9 @@ def _credential_request(
     )
 
 
+# end function _credential_request
+
+
 def _create_handle(
     socket: WebSocket,
     on_message: Callable[[ServerMessage], None],
@@ -282,6 +313,8 @@ def _create_handle(
         socket.on_message = None
         socket.on_error = None
 
+    # end function remove_data_listeners
+
     handle = ConnectionHandle(socket, remove_data_listeners)
 
     def report(error: CelerisConnectionError | ProtocolError) -> None:
@@ -290,9 +323,13 @@ def _create_handle(
             with contextlib.suppress(Exception, asyncio.CancelledError):
                 on_error(error)
 
+    # end function report
+
     def report_error(error: CelerisConnectionError | ProtocolError) -> None:
         report(error)
         handle.close()
+
+    # end function report_error
 
     # A decoder is built per transport message over that message's own bytes,
     # so nothing spans frames and a bad frame cannot desynchronize the next
@@ -321,8 +358,12 @@ def _create_handle(
                 CelerisConnectionError("Transport", "Message callback failed.")
             )
 
+    # end function receive_message
+
     def receive_error() -> None:
         report_error(CelerisConnectionError("Transport", "WebSocket failed."))
+
+    # end function receive_error
 
     def receive_close() -> None:
         # Once only. Closing the handle removes the data callbacks and marks
@@ -334,7 +375,12 @@ def _create_handle(
             with contextlib.suppress(Exception, asyncio.CancelledError):
                 on_close()
 
+    # end function receive_close
+
     socket.on_message = receive_message
     socket.on_error = receive_error
     socket.on_close = receive_close
     return handle
+
+
+# end function _create_handle
