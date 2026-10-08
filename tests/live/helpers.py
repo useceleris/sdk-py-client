@@ -26,8 +26,10 @@ from useceleris_client import (
 )
 
 # The SDK gives every publish its own id, which the server delivers as is
-# (RESEND-01): 16 random bytes, hex-encoded.
-GENERATED_MESSAGE_ID = re.compile("[0-9a-f]{32}")
+# (RESEND-01): msg__py_v<version>__, then 16 random bytes as hex.
+GENERATED_MESSAGE_ID = re.compile(
+    r"msg__py_v[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9._]*__[0-9a-f]{32}"
+)
 
 Value = TypeVar("Value")
 

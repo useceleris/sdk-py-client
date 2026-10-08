@@ -51,6 +51,12 @@ RATE_LIMIT_ERROR_TYPE = "RateLimitError"
 # publishers, so they are random and long enough never to collide.
 MESSAGE_ID_RANDOM_BYTES = 16
 
+# Every generated message id names the SDK that made it (RESEND-01). The version
+# is this package's; a test keeps it equal to the installed distribution.
+SDK_LANGUAGE = "py"
+
+SDK_VERSION = "1.0.0"
+
 # Decoder bounds. These limit parsing work and recursion, not message size; no
 # legitimate server message approaches them.
 MAXIMUM_FRAGMENTS = 4096
