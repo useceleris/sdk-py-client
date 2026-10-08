@@ -37,11 +37,17 @@ def requirement(name: str) -> str:
     return next(entry for entry in DEVELOPMENT if entry.split("==")[0] == name)
 
 
+# end function requirement
+
+
 @nox.session(python="3.14")
 def lint(session: nox.Session) -> None:
     session.install(requirement("ruff"))
     session.run("ruff", "check", ".")
     session.run("ruff", "format", "--check", ".")
+
+
+# end function lint
 
 
 @nox.session(python="3.14")
@@ -50,16 +56,25 @@ def typecheck(session: nox.Session) -> None:
     session.run("mypy")
 
 
+# end function typecheck
+
+
 @nox.session(python=PYTHONS)
 def tests(session: nox.Session) -> None:
     session.install("-e", ".", *DEVELOPMENT)
     session.run("pytest", *session.posargs)
 
 
+# end function tests
+
+
 @nox.session(python=PYTHONS)
 def live(session: nox.Session) -> None:
     session.install("-e", ".", *DEVELOPMENT)
     session.run("pytest", "-m", "live", "tests/live", *session.posargs)
+
+
+# end function live
 
 
 @nox.session(python=PYTHONS)
@@ -102,6 +117,9 @@ def package(session: nox.Session) -> None:
         session.run("mypy", "--strict", "quickstart.py")
 
 
+# end function package
+
+
 def check_wheel(wheel: Path) -> None:
     sources = sorted(
         path.relative_to(ROOT / "src").as_posix()
@@ -129,6 +147,9 @@ def check_wheel(wheel: Path) -> None:
     assert required == RUNTIME_DEPENDENCIES, required
 
 
+# end function check_wheel
+
+
 def assert_no_signing(name: str, source: str) -> None:
     imported: set[str] = set()
 
@@ -142,6 +163,9 @@ def assert_no_signing(name: str, source: str) -> None:
         f"{name} imports {imported & SIGNING_MODULES}"
     )
     assert "signing_secret" not in source, f"{name} mentions a signing secret"
+
+
+# end function assert_no_signing
 
 
 def check_sdist(sdist: Path) -> None:
@@ -159,3 +183,6 @@ def check_sdist(sdist: Path) -> None:
         ".gitignore",
     }, top_level
     assert not any("__pycache__" in name or name.endswith(".env") for name in names)
+
+
+# end function check_sdist

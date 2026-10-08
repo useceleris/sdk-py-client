@@ -81,6 +81,9 @@ target-version = "py310"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
+# End-of-definition markers ("# end method name") repeat the definition's
+# name, so they may run past the line length (CONVENTIONS.md, Layout).
+task-tags = ["TODO", "FIXME", "XXX", "end"]
 select = [
   "E",
   "W",
@@ -99,3 +102,6 @@ select = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["useceleris_client"]
+
+[tool.ruff.lint.pycodestyle]
+ignore-overlong-task-comments = true
