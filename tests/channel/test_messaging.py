@@ -218,6 +218,47 @@ class TestPublish:
 
     # end method test_rejects_invalid_options_before_writing
 
+    async def test_sends_your_own_id_unchanged_as_a_bulk_string_from_one_character(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket]
+    ) -> None:
+        lobby = setup.channel.default_segment()
+
+        await lobby.publish(b"x", message_id="a")
+        await lobby.publish(b"y", message_id="order-1042:shipped é")
+
+        assert sockets[-1].sent_frames() == [
+            "@PUB\n$7\ndefault\n$1\na\n$1\nx\n",
+            "@PUB\n$7\ndefault\n$21\norder-1042:shipped é\n$1\ny\n",
+        ]
+
+    # end method test_sends_your_own_id_unchanged_as_a_bulk_string_from_one_character
+
+    async def test_refuses_your_own_id_when_empty_or_with_a_line_break(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket]
+    ) -> None:
+        lobby = setup.channel.default_segment()
+        line_break = (
+            "Invalid command. message_id: "
+            "Must not contain CR, LF or unpaired UTF-16 surrogates."
+        )
+
+        refusals = [
+            ("", "Invalid command. message_id: Must not be empty."),
+            ("a\nb", line_break),
+            ("a\rb", line_break),
+        ]
+
+        for message_id, message in refusals:
+            error = await failure_of(publish(lobby, b"x", message_id=message_id))
+            assert isinstance(error, ConfigurationError)
+            assert str(error) == message
+
+        # Nothing was written; the control publish is the first frame.
+        await lobby.publish(b"x", message_id="control")
+        assert sockets[-1].sent_frames() == ["@PUB\n$7\ndefault\n$7\ncontrol\n$1\nx\n"]
+
+    # end method test_refuses_your_own_id_when_empty_or_with_a_line_break
+
     async def test_queues_publishes_behind_a_full_writer_and_sends_them_on_drain(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
