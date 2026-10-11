@@ -64,7 +64,7 @@ MESSAGE_ID_RANDOM_BYTES = 16
 # is this package's; a test keeps it equal to the installed distribution.
 SDK_LANGUAGE = "py"
 
-SDK_VERSION = "1.0.0"
+SDK_VERSION = "1.1.0"
 
 # Decoder bounds. These limit parsing work and recursion, not message size; no
 # legitimate server message approaches them.
