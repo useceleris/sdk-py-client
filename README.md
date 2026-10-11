@@ -156,15 +156,16 @@ membership.cancel()  # idempotent
 stop_lobby()
 ```
 
-Interests are counted per segment across every `Segment` object: the first `subscribe()` joins, and the last `cancel()` leaves. The default segment is never left. Subscriptions taken before `connect()` are sent when the channel connects, and every subscription is restored after a reconnect. Read access is checked when the server joins the segment, so a write-only member receives nothing. `metadata.timestamp` is an `int` in Unix milliseconds. A segment id is any non-empty text without CR or LF.
+Interests are counted per segment across every `Segment` object: the first `subscribe()` joins, and the last `cancel()` leaves. The default segment is never left. Subscriptions taken before `connect()` are sent when the channel connects, and every subscription is restored after a reconnect. A subscription needs read access to the segment, and a publish needs write access. `metadata.timestamp` is an `int` in Unix milliseconds. A segment id is any non-empty text without CR or LF.
 
 The segment membership on the server controls which messages you receive. A listener does not control it:
 
 - When you hold a `subscribe()` handle, you receive the messages of the segment. A listener alone receives no messages.
-- When the connection publishes to a segment, the server also joins the connection to that segment. With read and write access, the connection then receives messages. With write-only access, the connection joins, but it does not receive messages. With read-only access, the server does not accept the publish. To receive messages, call `subscribe()`.
-- When you cancel the last handle, the SDK tells the server to unsubscribe. This also stops a join from a publish. A presence subscription does not join or keep a segment.
+- A publish does not join the segment. To receive the messages of a segment, call `subscribe()`. This also applies to the echo of your own messages.
+- With write-only access, the connection can publish, and the server refuses `subscribe()` with a `PermissionDeniedError`. With read-only access, the connection can subscribe, and the server refuses the publish.
+- When you cancel the last handle, the SDK tells the server to unsubscribe. A presence subscription does not join or keep a segment.
 - The connection always receives the messages of `"default"`.
-- After a reconnect, the SDK subscribes again only to the segments that you hold a subscription for. A join from a publish does not continue after a reconnect. To continue to receive the messages of a segment, call `subscribe()`.
+- After a reconnect, the SDK subscribes again to the segments that you hold a subscription for.
 - A listener and a subscription are different items. When you remove a listener, your subscriptions do not change. When you cancel a subscription, your listeners do not change.
 
 To receive all messages from all segments, add a channel listener. The segment listeners get each message first, then the channel listeners get it:
@@ -207,7 +208,7 @@ except CelerisConnectionError as error:
         ...  # the socket failed mid-send: it may or may not have gone out
 ```
 
-Returning means the local socket accepted the bytes, nothing more: there is no receipt. A server denial (`PermissionDeniedError`) or plan size rejection (`MessageSizeLimitError`) arrives afterwards through `events().on_error`. Publishing joins the segment server-side, without granting read permission. Without `message_id`, the client generates an id: `msg__py_v`, the SDK version, two underscores, then 32 random lowercase hex digits, for example `msg__py_v1.0.0__4f1c9a0b7d2e43f6a8b5c1d0e9f27364`. A generated id holds only letters, digits, dots and underscores, and the double underscores keep it apart from the ids that the server generates (`msg_{node}_…`). The payload must be `bytes`, and may be empty; a command over 2 MiB encoded, or an invalid id, raises `ConfigurationError` before anything is sent. Cancelling the task awaiting `publish()` withdraws a publish that has not gone out.
+Returning means the local socket accepted the bytes, nothing more: there is no receipt. A server denial (`PermissionDeniedError`) or plan size rejection (`MessageSizeLimitError`) arrives afterwards through `events().on_error`. The cap of your plan counts the whole encoded command, not only the payload. A publish does not join the segment: call `subscribe()` to receive its messages. Without `message_id`, the client generates an id: `msg__py_v`, the SDK version, two underscores, then 32 random lowercase hex digits, for example `msg__py_v1.0.0__4f1c9a0b7d2e43f6a8b5c1d0e9f27364`. A generated id holds only letters, digits, dots and underscores, and the double underscores keep it apart from the ids that the server generates (`msg_{node}_…`). The payload must be `bytes`, and may be empty; a command over 2 MiB encoded, or an invalid id, raises `ConfigurationError` before anything is sent. Cancelling the task awaiting `publish()` withdraws a publish that has not gone out.
 
 While the channel is `reconnecting`, a publish waits in the queue and returns once it is sent on the new connection, after the restored subscriptions; the queue limit still applies. Publishes waiting when the connection drops wait the same way. When recovery ends in `failed`, each waiting publish raises the error `on_error` reports; `close()` makes each raise `Cancelled`. A publish the old connection was already given is never sent again.
 
@@ -345,7 +346,7 @@ def handle(error: ChannelError) -> None:
     if error.type == "PermissionDeniedError":
         ...  # the token lacks access to what error.sub_type tried on error.resource
     elif error.type == "MessageSizeLimitError":
-        ...  # a publish exceeded your plan's payload cap
+        ...  # a publish exceeded your plan's size cap
     elif error.type == "RateLimitError":
         ...  # the client pauses and resends; publish less often if it persists
     else:
@@ -390,7 +391,7 @@ On success the state becomes `connected`, then `on_recovery` fires. Subscription
 | What               | Value                                                                                                                  |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
 | Outbound command   | 2 MiB encoded, rejected before any write                                                                               |
-| Plan payload cap   | 64 KiB free, 128 KiB standard, 512 KiB pro, 1024 KiB prime; enforced by the server                                     |
+| Plan size cap      | 64 KiB free, 128 KiB standard, 512 KiB pro, 1024 KiB prime, for the whole encoded command. The server applies it       |
 | Writer bounds      | 64 pending commands / 2 MiB of unsent data; `publish_queue_size` queued publishes, 64 by default, plus resends         |
 | Rate-limit pause   | 1 s plus full jitter growing with consecutive limits, at most 31 s                                                     |
 | Resends            | last 2 s of commands, at most 64 publishes, each once                                                                  |
@@ -405,7 +406,7 @@ On success the state becomes `connected`, then `on_recovery` fires. Subscription
 | Close              | at most 5 s                                                                                                            |
 | Channel reference  | 1 to 255 ASCII letters, digits, hyphens or underscores                                                                 |
 
-Received messages are never size-checked: they are already in memory when they arrive. A publish over your plan's cap returns locally and is rejected afterwards with a `MessageSizeLimitError`, and it still counts toward your usage.
+Received messages are never size-checked: they are already in memory when they arrive. A publish over your plan's cap returns locally and is rejected afterwards with a `MessageSizeLimitError`, and it still counts toward your usage. The cap counts the whole encoded command, not only the payload.
 
 ## asyncio, threads and cancellation
 

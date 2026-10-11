@@ -118,8 +118,8 @@ stop_chat = chat.on_message(show)
 membership = chat.subscribe()
 
 # Publish to this segment. Returning means the local socket ACCEPTED the
-# bytes, not that the server received them. Publishing also joins the
-# segment server-side, even without subscribe().
+# bytes, not that the server received them. A publish does not join the
+# segment: to receive from it, hold a subscription.
 await chat.publish(json_payload({"hello": "world"}))
 
 # The default segment needs no subscribe(): membership came with connect().
@@ -127,8 +127,8 @@ lobby.on_message(lambda payload, metadata: print("lobby:", metadata.message_id))
 await lobby.publish(text_payload("hello lobby"))
 
 # A channel listener receives all messages from all segments of this
-# connection. This includes the segments that the connection joins when it
-# publishes. The segment listeners get each message first.
+# connection: "default" and each subscribed segment, also when they have no
+# segment listener. The segment listeners get each message first.
 remove_channel_listener = channel.events().on_message(
     lambda payload, metadata: print(metadata.segment_id, read_json(payload))
 )
