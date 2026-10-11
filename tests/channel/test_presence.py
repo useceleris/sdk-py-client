@@ -139,7 +139,7 @@ class TestPresenceInterests:
 
         await establish(setup, sockets)
 
-        assert sockets[-1].sent_frames() == [
+        assert sockets[-1].sent_commands() == [
             "@SUB\n$4\nbeta\n",
             "@PRES_SUB\n$7\ndefault\n",
             "@PRES_SUB\n$5\nalpha\n",

@@ -66,7 +66,7 @@ class TestSuspectWindow:
         sockets[-1].receive(rate_limit_frame())
         await timers.advance(1_000)
 
-        assert sockets[-1].sent_frames() == ["@SUB\n$4\nchat\n", "@SUB\n$5\nlobby\n"]
+        assert sockets[-1].sent_commands() == ["@SUB\n$4\nchat\n", "@SUB\n$5\nlobby\n"]
 
     # end method test_resends_a_subscription_sent_exactly_at_its_edge
 
@@ -82,7 +82,7 @@ class TestSuspectWindow:
         sockets[-1].receive(rate_limit_frame())
         await timers.advance(1_000)
 
-        assert len(sockets[-1].sent_frames()) == 2
+        assert len(sockets[-1].sent_commands()) == 2
 
     # end method test_resends_a_publish_sent_exactly_at_its_edge
 
@@ -306,7 +306,7 @@ class TestQuietSpan:
         socket.receive(rate_limit_frame())
         await timers.advance(1_000)
 
-        assert socket.sent_frames() == ["@SUB\n$5\nlobby\n", "@SUB\n$5\nother\n"]
+        assert socket.sent_commands() == ["@SUB\n$5\nlobby\n", "@SUB\n$5\nother\n"]
 
     # end method test_measures_from_the_first_send_after_a_limit
 
@@ -374,24 +374,26 @@ class TestWriter:
 
     # end method test_waits_for_a_buffer_too_full_for_the_next_publish
 
-    async def test_sends_the_next_publish_after_one_fails(
+    async def test_sends_the_next_frame_after_one_fails(
         self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
     ) -> None:
+        # 17 waiting publishes go out as a frame of 16, then one alone.
         sockets[-1].receive(rate_limit_frame())
         chat = setup.channel.segment("chat")
-        first = asyncio.ensure_future(chat.publish(b"1"))
-        second = asyncio.ensure_future(chat.publish(b"2"))
+        published = [asyncio.ensure_future(chat.publish(b"x")) for _ in range(17)]
         await flush()
         sockets[-1].send.side_effect = [RuntimeError("synthetic"), None]
 
         await timers.advance(1_000)
 
-        error = await failure_of(first)
-        assert isinstance(error, CelerisConnectionError)
-        assert error.code == "DeliveryUnknown"
-        await second
+        for publish in published[:16]:
+            error = await failure_of(publish)
+            assert isinstance(error, CelerisConnectionError)
+            assert error.code == "DeliveryUnknown"
 
-    # end method test_sends_the_next_publish_after_one_fails
+        await published[16]
+
+    # end method test_sends_the_next_frame_after_one_fails
 
 
 # end class TestWriter

@@ -16,6 +16,7 @@ from useceleris_client._connection import ConnectionHandle, open_connection
 from useceleris_client._constants import (
     CLOSE_BUDGET_MS,
     DEFAULT_SEGMENT_ID,
+    MESSAGE_SIZE_LIMIT_ERROR_TYPE,
     PRESENCE_LIST_COMMAND,
     RATE_LIMIT_ERROR_TYPE,
     RETRY_BUDGET_RESET_MS,
@@ -837,20 +838,19 @@ class Channel:
                 "NotConnected", f"Channel is not connected; it is {self._state}."
             )
 
+        if message_id is None:
+            message_id = self._internals.generate_message_id()
+
         data = encode_client_command(
             {
                 "command": "PUB",
                 "segment_id": segment_id,
-                "message_id": (
-                    message_id
-                    if message_id is not None
-                    else self._internals.generate_message_id()
-                ),
+                "message_id": message_id,
                 "payload": payload,
             }
         )
 
-        await self._command_queue.publish(segment_id, data)
+        await self._command_queue.publish(segment_id, message_id, data)
 
     # end method _publish_to_segment
 
@@ -914,6 +914,15 @@ class Channel:
 
         if frame.type == RATE_LIMIT_ERROR_TYPE:
             self._command_queue.receive_rate_limit()
+
+        # A publish refused for its size names itself by message id; the other
+        # commands in its frame ran (BATCH-01).
+        if (
+            frame.type == MESSAGE_SIZE_LIMIT_ERROR_TYPE
+            and frame.sub_type == "PUB"
+            and isinstance(frame.resource, str)
+        ):
+            self._command_queue.forget_refused(frame.resource)
 
         self._emit_error(error)
 

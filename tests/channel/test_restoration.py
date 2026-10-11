@@ -68,7 +68,7 @@ async def test_restores_current_intent_messages_then_presence_in_order(
     assert channel.state == "connected"
     # Interests only, messages before presence, registration order, cancelled
     # intent excluded, no publish resend.
-    assert reconnect_socket.sent_frames() == [
+    assert reconnect_socket.sent_commands() == [
         "@SUB\n$4\nbeta\n",
         "@SUB\n$5\nalpha\n",
         "@PRES_SUB\n$7\ndefault\n",
@@ -176,13 +176,16 @@ async def test_restores_more_than_64_subscriptions_as_the_writer_drains(
     reconnect_socket.open()
     await flush()
 
+    # 4 frames of 16 fill the writer's 64 commands.
     assert setup.channel.state == "connected"
-    assert reconnect_socket.send.call_count == 64
+    assert reconnect_socket.send.call_count == 4
+    assert len(reconnect_socket.sent_commands()) == 64
 
     reconnect_socket.buffered_amount = 0
     await timers.advance(50)
 
-    assert reconnect_socket.send.call_count == 65
+    assert reconnect_socket.send.call_count == 5
+    assert len(reconnect_socket.sent_commands()) == 65
     assert errors == []
 
 
@@ -201,8 +204,8 @@ async def test_restores_intent_again_on_a_second_recovery_without_duplicates(
     second_recovery_socket = sockets[-1]
 
     expected = ["@SUB\n$4\nchat\n", "@PRES_SUB\n$4\nchat\n"]
-    assert first_recovery_socket.sent_frames() == expected
-    assert second_recovery_socket.sent_frames() == expected
+    assert first_recovery_socket.sent_commands() == expected
+    assert second_recovery_socket.sent_commands() == expected
     assert setup.channel.state == "connected"
     assert timers.count == 0
 

@@ -64,7 +64,7 @@ async def test_sends_many_queued_publishes_in_order_once_the_writer_drains(
     await timers.advance(50)
     await asyncio.gather(*queued)
 
-    payloads = [frame.split("\n")[-2] for frame in socket.sent_frames()]
+    payloads = [command.split("\n")[-2] for command in socket.sent_commands()]
     assert payloads == [str(index) for index in range(1_000)]
     assert timers.count == 0
 

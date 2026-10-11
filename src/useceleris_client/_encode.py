@@ -16,6 +16,18 @@ def encode_client_command(command: ClientCommand) -> bytes:
 # end function encode_client_command
 
 
+def encode_batch(commands: list[bytes]) -> bytes:
+    """One frame for the commands: a single command as it is, several in a
+    `*N` array."""
+    if len(commands) == 1:
+        return commands[0]
+
+    return f"*{len(commands)}\n".encode() + b"".join(commands)
+
+
+# end function encode_batch
+
+
 def _command_too_large() -> ConfigurationError:
     return ConfigurationError(
         "Encoded command exceeds 2 MiB. That is the most the server accepts on "

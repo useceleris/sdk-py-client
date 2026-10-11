@@ -285,7 +285,9 @@ class TestPublish:
         await timers.advance(50)
         await asyncio.gather(*queued)
 
-        assert socket.send.call_count == 128
+        # The 64 that waited go out as 4 frames of 16.
+        assert socket.send.call_count == 68
+        assert len(socket.sent_commands()) == 128
         assert setup.channel.state == "connected"
 
     # end method test_queues_publishes_behind_a_full_writer_and_sends_them_on_drain
@@ -310,6 +312,217 @@ class TestPublish:
 # end class TestPublish
 
 
+def publish_command(message_id: str, payload: str) -> str:
+    return (
+        f"@PUB\n$4\nchat\n${len(message_id)}\n{message_id}\n"
+        f"${len(payload)}\n{payload}\n"
+    )
+
+
+# end function publish_command
+
+
+class TestBatching:
+    """A full socket buffer makes the writer hold every command until release."""
+
+    @staticmethod
+    async def release(socket: FakeWebSocket, timers: FakeTimers) -> None:
+        socket.buffered_amount = 0
+        await timers.advance(50)
+
+    # end method release
+
+    async def test_sends_the_commands_waiting_for_the_writer_as_one_array_in_order(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        socket = sockets[-1]
+        socket.buffered_amount = 2 * 1024 * 1024
+        chat = setup.channel.segment("chat")
+        chat.subscribe()
+        published = [
+            publish(chat, b"m1", message_id="id-1"),
+            publish(chat, b"m2", message_id="id-2"),
+        ]
+        await flush()
+        socket.send.assert_not_called()
+
+        await self.release(socket, timers)
+        await asyncio.gather(*published)
+
+        assert socket.sent_frames() == [
+            "*3\n@SUB\n$4\nchat\n"
+            + publish_command("id-1", "m1")
+            + publish_command("id-2", "m2")
+        ]
+
+    # end method test_sends_the_commands_waiting_for_the_writer_as_one_array_in_order
+
+    async def test_sends_a_single_waiting_command_without_an_array_header(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        socket = sockets[-1]
+        socket.buffered_amount = 2 * 1024 * 1024
+        published = publish(setup.channel.segment("chat"), b"x", message_id="id-1")
+        await flush()
+
+        await self.release(socket, timers)
+        await published
+
+        assert socket.sent_frames() == [publish_command("id-1", "x")]
+
+    # end method test_sends_a_single_waiting_command_without_an_array_header
+
+    async def test_packs_at_most_16_commands_into_one_frame(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        socket = sockets[-1]
+        socket.buffered_amount = 2 * 1024 * 1024
+        chat = setup.channel.segment("chat")
+        identifiers = [f"m-{index}" for index in range(17)]
+        published = [publish(chat, b"x", message_id=key) for key in identifiers]
+        await flush()
+
+        await self.release(socket, timers)
+        await asyncio.gather(*published)
+
+        frames = socket.sent_frames()
+        assert len(frames) == 2
+        assert frames[0].startswith("*16\n@PUB")
+        assert frames[1] == publish_command("m-16", "x")
+        assert socket.sent_commands() == [
+            publish_command(key, "x") for key in identifiers
+        ]
+
+    # end method test_packs_at_most_16_commands_into_one_frame
+
+    async def test_packs_commands_up_to_64_kib_with_the_array_header_and_no_further(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        # A publish here is 26 bytes of framing plus its payload, so `*2\n` and
+        # payloads of 32 740 and 32 741 bytes make exactly 65 536.
+        socket = sockets[-1]
+        chat = setup.channel.segment("chat")
+        socket.buffered_amount = 2 * 1024 * 1024
+        fits = [
+            publish(chat, bytes(32_740), message_id="a"),
+            publish(chat, bytes(32_741), message_id="b"),
+        ]
+        await flush()
+
+        await self.release(socket, timers)
+        await asyncio.gather(*fits)
+
+        assert socket.send.call_count == 1
+        assert len(socket.send.call_args_list[0].args[0]) == 65_536
+
+        socket.buffered_amount = 2 * 1024 * 1024
+        overflows = [
+            publish(chat, bytes(32_740), message_id="c"),
+            publish(chat, bytes(32_742), message_id="d"),
+        ]
+        await flush()
+
+        await self.release(socket, timers)
+        await asyncio.gather(*overflows)
+
+        assert socket.send.call_count == 3
+        assert [frame[:4] for frame in socket.sent_frames()[1:]] == ["@PUB", "@PUB"]
+
+    # end method test_packs_commands_up_to_64_kib_with_the_array_header_and_no_further
+
+    async def test_sends_a_command_larger_than_64_kib_alone(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        socket = sockets[-1]
+        socket.buffered_amount = 2 * 1024 * 1024
+        chat = setup.channel.segment("chat")
+        published = [
+            publish(chat, b"x", message_id="a"),
+            publish(chat, bytes(70 * 1024), message_id="b"),
+            publish(chat, b"x", message_id="c"),
+        ]
+        await flush()
+
+        await self.release(socket, timers)
+        await asyncio.gather(*published)
+
+        frames = socket.sent_frames()
+        assert len(frames) == 3
+        assert frames[0] == publish_command("a", "x")
+        assert frames[1].startswith("@PUB\n$4\nchat\n$1\nb\n$71680\n")
+        assert frames[2] == publish_command("c", "x")
+
+    # end method test_sends_a_command_larger_than_64_kib_alone
+
+    async def test_fails_every_publish_in_a_frame_the_socket_refuses(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        socket = sockets[-1]
+        socket.buffered_amount = 2 * 1024 * 1024
+        chat = setup.channel.segment("chat")
+        published = [publish(chat, b"x", message_id=key) for key in ("a", "b", "c")]
+        await flush()
+        socket.send.side_effect = RuntimeError("synthetic-secret")
+
+        await self.release(socket, timers)
+
+        for task in published:
+            error = await failure_of(task)
+            assert isinstance(error, CelerisConnectionError)
+            assert error.code == "DeliveryUnknown"
+
+        assert socket.send.call_count == 1
+        assert setup.channel.state == "connected"
+
+    # end method test_fails_every_publish_in_a_frame_the_socket_refuses
+
+    async def test_reconnects_when_a_refused_frame_carried_a_subscription_change(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        socket = sockets[-1]
+        socket.buffered_amount = 2 * 1024 * 1024
+        setup.channel.segment("chat").subscribe()
+        published = publish(setup.channel.segment("lobby"), b"x", message_id="a")
+        await flush()
+        socket.send.side_effect = RuntimeError("synthetic-secret")
+
+        await self.release(socket, timers)
+
+        error = await failure_of(published)
+        assert isinstance(error, CelerisConnectionError)
+        assert error.code == "DeliveryUnknown"
+        assert setup.channel.state == "reconnecting"
+
+    # end method test_reconnects_when_a_refused_frame_carried_a_subscription_change
+
+    async def test_takes_a_cancelled_publish_out_before_the_next_frame_is_packed(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        socket = sockets[-1]
+        socket.buffered_amount = 2 * 1024 * 1024
+        chat = setup.channel.segment("chat")
+        first = publish(chat, b"x", message_id="a")
+        cancelled = publish(chat, b"x", message_id="b")
+        last = publish(chat, b"x", message_id="c")
+        await flush()
+
+        cancelled.cancel()
+        await flush()
+
+        await self.release(socket, timers)
+        await asyncio.gather(first, last)
+
+        assert cancelled.cancelled()
+        assert socket.sent_frames() == [
+            "*2\n" + publish_command("a", "x") + publish_command("c", "x")
+        ]
+
+    # end method test_takes_a_cancelled_publish_out_before_the_next_frame_is_packed
+
+
+# end class TestBatching
+
+
 class TestSubscriptionsAndFlush:
     async def test_flushes_registered_interests_on_connect_in_order(
         self, sockets: list[FakeWebSocket], timers: FakeTimers
@@ -321,7 +534,7 @@ class TestSubscriptionsAndFlush:
 
         await establish(setup, sockets)
 
-        assert sockets[-1].sent_frames() == ["@SUB\n$4\nbeta\n", "@SUB\n$5\nalpha\n"]
+        assert sockets[-1].sent_commands() == ["@SUB\n$4\nbeta\n", "@SUB\n$5\nalpha\n"]
 
     # end method test_flushes_registered_interests_on_connect_in_order
 
@@ -364,7 +577,7 @@ class TestSubscriptionsAndFlush:
         await timers.advance(50)
         await queued
 
-        assert socket.sent_frames()[64:] == [
+        assert socket.sent_commands()[64:] == [
             "@SUB\n$4\nchat\n",
             "@PUB\n$5\nlobby\n$12\ngenerated-65\n$1\ny\n",
         ]
@@ -388,13 +601,15 @@ class TestSubscriptionsAndFlush:
         socket.open()
         await pending
 
+        # 4 frames of 16 fill the writer's 64 commands.
         assert setup.channel.state == "connected"
-        assert socket.send.call_count == 64
+        assert socket.send.call_count == 4
+        assert len(socket.sent_commands()) == 64
 
         socket.buffered_amount = 0
         await timers.advance(50)
 
-        assert socket.send.call_count == 65
+        assert socket.send.call_count == 5
         assert socket.sent_frames()[-1] == "@SUB\n$10\nsegment-64\n"
 
     # end method test_restores_more_than_64_subscriptions_on_connect_as_it_drains
@@ -943,7 +1158,9 @@ class TestRateLimitRecovery:
         await timers.advance(1)
         await queued
 
-        assert socket.sent_frames() == [
+        # The resend goes out packed in one frame.
+        assert socket.send.call_count == 1
+        assert socket.sent_commands() == [
             "@SUB\n$4\nchat\n",
             "@PRES_SUB\n$4\nchat\n",
             "@PUB\n$5\nlobby\n$11\ngenerated-1\n$1\na\n",
@@ -951,6 +1168,41 @@ class TestRateLimitRecovery:
         ]
 
     # end method test_pauses_then_resends_recent_subscriptions_before_recent_publishes
+
+    async def test_does_not_resend_a_publish_the_server_refused_for_its_size(
+        self, setup: ChannelSetup, sockets: list[FakeWebSocket], timers: FakeTimers
+    ) -> None:
+        errors: list[ChannelError] = []
+        setup.channel.events().on_error(errors.append)
+        chat = setup.channel.segment("chat")
+        await chat.publish(b"big", message_id="too-big")
+        await chat.publish(b"ok", message_id="fits")
+        socket = sockets[-1]
+        socket.send.reset_mock()
+
+        socket.receive(
+            error_frame(
+                "MessageSizeLimitError",
+                "Message size limit exceeded; payload size = 3 bytes; "
+                "size limit = 1 KB",
+                "PUB",
+                "$7\ntoo-big\n",
+            )
+        )
+        socket.receive(rate_limit_frame())
+        await timers.advance(1_000)
+
+        assert socket.sent_frames() == ["@PUB\n$4\nchat\n$4\nfits\n$2\nok\n"]
+        assert len(errors) == 2
+        refused = errors[0]
+        assert isinstance(refused, ServerError)
+        assert (refused.type, refused.sub_type, refused.resource) == (
+            "MessageSizeLimitError",
+            "PUB",
+            "too-big",
+        )
+
+    # end method test_does_not_resend_a_publish_the_server_refused_for_its_size
 
     # R2
     async def test_resends_a_command_sent_exactly_2000_ms_before_the_limit_not_2001(
@@ -968,7 +1220,7 @@ class TestRateLimitRecovery:
         socket.receive(rate_limit_frame())
         await timers.advance(1_000)
 
-        assert socket.sent_frames() == [
+        assert socket.sent_commands() == [
             "@SUB\n$4\nedge\n",
             "@PUB\n$4\nchat\n$11\ngenerated-2\n$4\nedge\n",
         ]
@@ -1009,7 +1261,7 @@ class TestRateLimitRecovery:
         await timers.advance(1_000)
 
         # The lobby nets out to never subscribed: UNSUB is its final state.
-        assert sockets[-1].sent_frames() == [
+        assert sockets[-1].sent_commands() == [
             "@SUB\n$4\nchat\n",
             "@UNSUB\n$5\nlobby\n",
         ]
@@ -1098,8 +1350,8 @@ class TestRateLimitRecovery:
         await timers.advance(1_000)
         await published
 
-        # Publishing joins the segment, so the UNSUB has to follow it.
-        assert sockets[-1].sent_frames() == [
+        # The commands for one segment keep their call order.
+        assert sockets[-1].sent_commands() == [
             "@PUB\n$4\nchat\n$11\ngenerated-1\n$1\nx\n",
             "@UNSUB\n$4\nchat\n",
         ]
@@ -1123,7 +1375,7 @@ class TestRateLimitRecovery:
         socket.send.reset_mock()
         socket.receive(rate_limit_frame())
         await timers.advance(1_000)
-        assert socket.sent_frames() == [
+        assert socket.sent_commands() == [
             "@SUB\n$4\nchat\n",
             "@PUB\n$5\nlobby\n$11\ngenerated-1\n$1\nx\n",
         ]
@@ -1235,7 +1487,7 @@ class TestRateLimitRecovery:
         await timers.advance(1_000)
         await asyncio.gather(first, second)
 
-        assert sockets[-1].sent_frames() == [
+        assert sockets[-1].sent_commands() == [
             "@PUB\n$4\nchat\n$11\ngenerated-1\n$1\n1\n",
             "@SUB\n$4\nchat\n",
             "@PUB\n$4\nchat\n$11\ngenerated-2\n$1\n2\n",
@@ -1335,7 +1587,7 @@ class TestRateLimitRecovery:
         socket.send.reset_mock()
         setup.channel.segment("lobby").subscribe()
 
-        assert socket.sent_frames() == ["@SUB\n$5\nlobby\n", "@SUB\n$4\nchat\n"]
+        assert socket.sent_commands() == ["@SUB\n$5\nlobby\n", "@SUB\n$4\nchat\n"]
         query.cancel()
         await failure_of(query)
 
@@ -1355,7 +1607,7 @@ class TestRateLimitRecovery:
         socket.receive(rate_limit_frame())
         await timers.advance(1_000)
 
-        assert socket.sent_frames() == [
+        assert socket.sent_commands() == [
             publish_frame("lobby", f"generated-{index}", str(index))
             for index in range(2, 66)
         ]
@@ -1498,7 +1750,7 @@ class TestPublishesAcrossAReconnect:
         await reconnect(sockets, timers)
         await asyncio.gather(*published)
 
-        assert sockets[-1].sent_frames() == [
+        assert sockets[-1].sent_commands() == [
             publish_frame("chat", "generated-1", "a"),
             publish_frame("chat", "generated-2", "b"),
             publish_frame("chat", "generated-3", "c"),
@@ -1524,7 +1776,7 @@ class TestPublishesAcrossAReconnect:
         await reconnect(sockets, timers)
         await asyncio.gather(before_drop, during_outage)
 
-        assert sockets[-1].sent_frames() == [
+        assert sockets[-1].sent_commands() == [
             "@SUB\n$4\nchat\n",
             "@SUB\n$4\nnews\n",
             "@PRES_SUB\n$5\nlobby\n",

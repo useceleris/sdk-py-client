@@ -8,6 +8,8 @@ from useceleris_client._commands import InterestCommand
 from useceleris_client._connection import ConnectionHandle
 from useceleris_client._constants import (
     DRAIN_RETRY_MS,
+    MAXIMUM_BATCH_BYTES,
+    MAXIMUM_BATCH_COMMANDS,
     MAXIMUM_CONSECUTIVE_RATE_LIMITS,
     MAXIMUM_PENDING_COMMANDS,
     MAXIMUM_PUBLISH_RESENDS,
@@ -17,7 +19,7 @@ from useceleris_client._constants import (
     RATE_LIMIT_COOLDOWN_MS,
     RATE_LIMIT_SUSPECT_WINDOW_MS,
 )
-from useceleris_client._encode import encode_client_command
+from useceleris_client._encode import encode_batch, encode_client_command
 from useceleris_client._errors import (
     CelerisConnectionError,
     CelerisError,
@@ -51,6 +53,7 @@ class CommandQueueDelegates:
 @dataclass(eq=False)
 class _QueuedPublish:
     segment_id: str
+    message_id: str
     data: bytes
     # Its place in the order commands were queued in.
     sequence: int
@@ -81,6 +84,29 @@ class _SentPublish:
 # end class _SentPublish
 
 
+@dataclass(frozen=True)
+class _PendingInterest:
+    kind: InterestKind
+    segment_id: str
+    sequence: int
+
+
+# end class _PendingInterest
+
+
+@dataclass(frozen=True)
+class _BatchedCommand:
+    """A command taken for the frame being packed: a publish, or else a
+    subscription change."""
+
+    data: bytes
+    publish: _QueuedPublish | None = None
+    interest: _PendingInterest | None = None
+
+
+# end class _BatchedCommand
+
+
 def _settle(publish: _QueuedPublish, error: CelerisError | None = None) -> None:
     if publish.sent.done():
         return
@@ -95,7 +121,8 @@ def _settle(publish: _QueuedPublish, error: CelerisError | None = None) -> None:
 
 
 class CommandQueue:
-    """Sends subscription changes ahead of publishes, waits out a full writer,
+    """Sends subscription changes ahead of publishes, packs the commands
+    waiting when it sends into one frame (BATCH-01), waits out a full writer,
     and resends recent commands after a rate limit (RESEND-01).
 
     The server never says which frame a rate limit dropped, so everything sent
@@ -144,7 +171,7 @@ class CommandQueue:
 
     # end method queue_interest
 
-    async def publish(self, segment_id: str, data: bytes) -> None:
+    async def publish(self, segment_id: str, message_id: str, data: bytes) -> None:
         """Returns once the publish is handed to the socket. Cancelling the
         caller withdraws a publish that has not gone out."""
         if len(self._publishes) >= self._publish_queue_size:
@@ -157,6 +184,7 @@ class CommandQueue:
         self._sequence += 1
         publish = _QueuedPublish(
             segment_id=segment_id,
+            message_id=message_id,
             data=data,
             sequence=self._sequence,
             sent=asyncio.get_running_loop().create_future(),
@@ -197,6 +225,17 @@ class CommandQueue:
             self._first_sent_since_rate_limit_at = self._delegates.clock()
 
     # end method send_now
+
+    def forget_refused(self, message_id: str) -> None:
+        """The server refused this publish for its size, so a later rate limit
+        must not send it, and bill it, again."""
+        self._recent_publishes = deque(
+            sent
+            for sent in self._recent_publishes
+            if sent.publish.message_id != message_id
+        )
+
+    # end method forget_refused
 
     def receive_rate_limit(self) -> None:
         # A limit arriving while sending is paused, with nothing sent since
@@ -243,8 +282,8 @@ class CommandQueue:
     def restore_interests(self, interests: list[tuple[InterestKind, str]]) -> None:
         """Restored subscriptions go ahead of every waiting publish, even one
         queued earlier to the same segment, so the connection is a member of its
-        segments again before the publishes join them (QUEUE-01). Drains once
-        all are marked, so no publish slips between them."""
+        segments again before the publishes go out (QUEUE-01). Drains once all
+        are marked, so no publish slips between them."""
         for kind, segment_id in interests:
             self._pending_interests[kind][segment_id] = 0
 
@@ -392,27 +431,144 @@ class CommandQueue:
             self._delegates.clock(), RATE_LIMIT_SUSPECT_WINDOW_MS
         )
 
-        while True:
-            interest = self._next_ready_interest()
-
-            if interest is not None:
-                if not self._send_interest(handle, *interest):
-                    return
-
-                continue
-
-            if not self._publishes:
-                return
-
-            if not self._send_publish(handle, self._publishes[0]):
-                return
+        while self._send_batch(handle):
+            pass
 
     # end method _drain
 
+    # Sends the waiting commands as one frame. False when draining has to stop.
+    def _send_batch(self, handle: ConnectionHandle) -> bool:
+        if self._next_command() is None:
+            return False
+
+        if not self._has_room(handle):
+            self._schedule_drain()
+            return False
+
+        batch = self._pack_batch(MAXIMUM_PENDING_COMMANDS - self._pending_commands)
+
+        try:
+            handle.send(encode_batch([command.data for command in batch]))
+        except CelerisConnectionError as error:
+            if error.code == "Backpressure":
+                self._unpack_batch(batch)
+                self._schedule_drain()
+                return False
+
+            return self._fail_batch(batch, error)
+        except ConfigurationError as error:
+            return self._fail_batch(batch, error)
+
+        self._pending_commands += len(batch)
+
+        if self._first_sent_since_rate_limit_at is None:
+            self._first_sent_since_rate_limit_at = self._delegates.clock()
+
+        for command in batch:
+            if command.publish is not None:
+                self._record_sent_publish(command.publish)
+                _settle(command.publish)
+            elif command.interest is not None:
+                self._record_sent_interest(
+                    command.interest.kind, command.interest.segment_id
+                )
+
+        return True
+
+    # end method _send_batch
+
+    # Takes the waiting commands for one frame, in order: at most `room` and
+    # MAXIMUM_BATCH_COMMANDS of them, within MAXIMUM_BATCH_BYTES with the array
+    # header. A first command larger than that goes alone.
+    def _pack_batch(self, room: int) -> list[_BatchedCommand]:
+        batch: list[_BatchedCommand] = []
+        byte_length = 0
+
+        while len(batch) < min(room, MAXIMUM_BATCH_COMMANDS):
+            command = self._next_command()
+
+            if command is None:
+                break
+
+            frame_length = len(f"*{len(batch) + 1}\n") + byte_length + len(command.data)
+
+            if batch and frame_length > MAXIMUM_BATCH_BYTES:
+                break
+
+            if command.publish is not None:
+                self._publishes.pop(0)
+            elif command.interest is not None:
+                del self._pending_interests[command.interest.kind][
+                    command.interest.segment_id
+                ]
+
+            batch.append(command)
+            byte_length += len(command.data)
+
+        return batch
+
+    # end method _pack_batch
+
+    # The next command to send, left in place. A subscription change that
+    # needs nothing sent is done here.
+    def _next_command(self) -> _BatchedCommand | None:
+        while (interest := self._next_ready_interest()) is not None:
+            command = self._delegates.interest_command(
+                interest.kind, interest.segment_id
+            )
+
+            if command is not None:
+                return _BatchedCommand(
+                    encode_client_command(command), interest=interest
+                )
+
+            del self._pending_interests[interest.kind][interest.segment_id]
+
+        if not self._publishes:
+            return None
+
+        return _BatchedCommand(self._publishes[0].data, publish=self._publishes[0])
+
+    # end method _next_command
+
+    # The socket had no room for the frame, so its commands wait again.
+    def _unpack_batch(self, batch: list[_BatchedCommand]) -> None:
+        publishes: list[_QueuedPublish] = []
+
+        for command in batch:
+            if command.publish is not None:
+                publishes.append(command.publish)
+            elif command.interest is not None:
+                interest = command.interest
+                self._pending_interests[interest.kind][interest.segment_id] = (
+                    interest.sequence
+                )
+
+        self._publishes = publishes + self._publishes
+
+    # end method _unpack_batch
+
+    # Every publish in a frame the socket refused fails with its error;
+    # ConnectionHandle.send raises nothing but SDK errors, such as
+    # DeliveryUnknown. A refused subscription change leaves the server's view
+    # unknown, so draining stops.
+    def _fail_batch(self, batch: list[_BatchedCommand], error: CelerisError) -> bool:
+        for command in batch:
+            if command.publish is not None:
+                _settle(command.publish, error)
+
+        if all(command.publish is not None for command in batch):
+            return True
+
+        self._delegates.receive_interest_write_failure()
+        return False
+
+    # end method _fail_batch
+
     # The first subscription change with no earlier publish to its segment
-    # still queued: publishing joins the segment, so a change has to follow
-    # the publishes queued before it for the segment to end up as asked.
-    def _next_ready_interest(self) -> tuple[InterestKind, str] | None:
+    # still queued: the commands for one segment keep their call order, so a
+    # change follows the publishes queued before it (RESEND-01).
+    def _next_ready_interest(self) -> _PendingInterest | None:
         for kind in _INTEREST_KINDS:
             for segment_id, sequence in self._pending_interests[kind].items():
                 blocked = any(
@@ -421,80 +577,11 @@ class CommandQueue:
                 )
 
                 if not blocked:
-                    return kind, segment_id
+                    return _PendingInterest(kind, segment_id, sequence)
 
         return None
 
     # end method _next_ready_interest
-
-    # False when draining has to stop.
-    def _send_interest(
-        self, handle: ConnectionHandle, kind: InterestKind, segment_id: str
-    ) -> bool:
-        command = self._delegates.interest_command(kind, segment_id)
-
-        if command is not None:
-            try:
-                sent = self._write(handle, encode_client_command(command))
-            except (ConfigurationError, CelerisConnectionError):
-                self._delegates.receive_interest_write_failure()
-                return False
-
-            if not sent:
-                return False
-
-            self._record_sent_interest(kind, segment_id)
-
-        del self._pending_interests[kind][segment_id]
-        return True
-
-    # end method _send_interest
-
-    # False when draining has to stop. A publish the socket refuses fails
-    # alone; ConnectionHandle.send raises nothing but SDK errors, such as
-    # DeliveryUnknown.
-    def _send_publish(self, handle: ConnectionHandle, publish: _QueuedPublish) -> bool:
-        try:
-            sent = self._write(handle, publish.data)
-        except (ConfigurationError, CelerisConnectionError) as error:
-            self._publishes.pop(0)
-            _settle(publish, error)
-            return True
-
-        if not sent:
-            return False
-
-        self._publishes.pop(0)
-        self._record_sent_publish(publish)
-        _settle(publish)
-        return True
-
-    # end method _send_publish
-
-    # False when the writer is full; a drain is then scheduled. Any other send
-    # failure is raised for the caller to handle.
-    def _write(self, handle: ConnectionHandle, data: bytes) -> bool:
-        if not self._has_room(handle):
-            self._schedule_drain()
-            return False
-
-        try:
-            handle.send(data)
-        except CelerisConnectionError as error:
-            if error.code != "Backpressure":
-                raise
-
-            self._schedule_drain()
-            return False
-
-        self._pending_commands += 1
-
-        if self._first_sent_since_rate_limit_at is None:
-            self._first_sent_since_rate_limit_at = self._delegates.clock()
-
-        return True
-
-    # end method _write
 
     # No drain event exists: the command count resets whenever the buffer is
     # observed empty (documented approximation).

@@ -6,7 +6,7 @@
 # checking them bounds no memory and only discards data.
 #
 # The command bound is the server's transport ceiling: above it no plan can
-# accept a command. Each plan's own, smaller payload cap is enforced by the
+# accept a command. Each plan's own, smaller command cap is enforced by the
 # server and surfaces as a MessageSizeLimitError server error.
 MAXIMUM_COMMAND_BYTES = 2 * 1024 * 1024
 
@@ -15,6 +15,13 @@ MAXIMUM_COMMAND_BYTES = 2 * 1024 * 1024
 MAXIMUM_BUFFERED_BYTES = MAXIMUM_COMMAND_BYTES
 
 MAXIMUM_PENDING_COMMANDS = 64
+
+# Batching (BATCH-01). Commands waiting when the writer sends go out together in
+# one `*N` frame of at most this many commands and bytes, header included. A
+# command larger than the byte bound goes alone. The server refuses an array of
+# more than 16 commands.
+MAXIMUM_BATCH_COMMANDS = 16
+MAXIMUM_BATCH_BYTES = 64 * 1024
 
 # Outbound recovery (RESEND-01). A rate limit is reported without saying which
 # frame it dropped, so whatever went out recently is resent.
@@ -46,6 +53,8 @@ DRAIN_RETRY_MS = 50
 
 # The error type the server sends for any rate limit.
 RATE_LIMIT_ERROR_TYPE = "RateLimitError"
+
+MESSAGE_SIZE_LIMIT_ERROR_TYPE = "MessageSizeLimitError"
 
 # Generated message ids share every receiver's dedup window with ids from other
 # publishers, so they are random and long enough never to collide.

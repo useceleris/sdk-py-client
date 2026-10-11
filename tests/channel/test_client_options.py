@@ -88,7 +88,7 @@ def publish(setup: ChannelSetup, payload: bytes) -> "asyncio.Task[None]":
 
 
 def published_payloads(socket: FakeWebSocket) -> list[str]:
-    return [frame.split("\n")[-2] for frame in socket.sent_frames()]
+    return [command.split("\n")[-2] for command in socket.sent_commands()]
 
 
 # end function published_payloads

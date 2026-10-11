@@ -67,5 +67,44 @@ class FakeWebSocket:
 
     # end method sent_frames
 
+    def sent_commands(self) -> list[str]:
+        """Every command sent, in order, with each `*N` frame split into its
+        commands."""
+        return [
+            command.decode()
+            for call in self.send.call_args_list
+            for command in _split_frame(call.args[0])
+        ]
+
+    # end method sent_commands
+
 
 # end class FakeWebSocket
+
+
+def _split_frame(frame: bytes) -> list[bytes]:
+    if not frame.startswith(b"*"):
+        return [frame]
+
+    commands: list[bytes] = []
+    offset = frame.index(b"\n") + 1
+
+    while offset < len(frame):
+        start = offset
+        offset = frame.index(b"\n", offset) + 1
+
+        # Fields follow the command name until the next command starts.
+        while offset < len(frame) and frame[offset : offset + 1] != b"@":
+            line_end = frame.index(b"\n", offset)
+            field = frame[offset:line_end]
+            offset = line_end + 1
+
+            if field.startswith(b"$") and field != b"$-1":
+                offset += int(field[1:]) + 1
+
+        commands.append(frame[start:offset])
+
+    return commands
+
+
+# end function _split_frame
