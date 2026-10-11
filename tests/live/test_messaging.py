@@ -141,14 +141,15 @@ async def test_round_trips_a_large_binary_payload() -> None:
 
 
 # Needs the qualification app on a plan with message_size_limit_in_kb of at
-# least 1024.
-async def test_round_trips_a_full_1024_kib_payload() -> None:
+# least 1024. The cap counts the whole encoded command, so the largest payload
+# is the cap less its framing.
+async def test_round_trips_a_payload_just_under_the_1024_kib_plan_cap() -> None:
     reference = unique_channel_reference("huge")
     publisher = await connected_channel(reference)
     receiver = await connected_channel(reference)
     receiver.segment("bulk").subscribe()
     await asyncio.sleep(1.5)
-    payload = patterned(1024 * 1024)
+    payload = patterned(1024 * 1024 - 96)
 
     await publisher.segment("bulk").publish(payload)
 
@@ -157,7 +158,7 @@ async def test_round_trips_a_full_1024_kib_payload() -> None:
     message = await next_message(
         receiver.segment("bulk"),
         lambda received: len(received.payload) == len(payload),
-        "the 1024 KiB delivery",
+        "the delivery just under the cap",
         30,
     )
     assert message.payload == payload
@@ -165,7 +166,7 @@ async def test_round_trips_a_full_1024_kib_payload() -> None:
     await receiver.close()
 
 
-# end function test_round_trips_a_full_1024_kib_payload
+# end function test_round_trips_a_payload_just_under_the_1024_kib_plan_cap
 
 
 async def test_reports_a_publish_over_the_plan_cap_as_message_size_limit() -> None:
@@ -462,11 +463,13 @@ async def test_round_trips_an_empty_payload(opened: list[Channel]) -> None:
 # end function test_round_trips_an_empty_payload
 
 
-async def test_refuses_a_payload_one_byte_over_the_1024_kib_plan_cap(
+# The cap counts the command's framing, so a payload of the cap itself makes a
+# command over it.
+async def test_refuses_a_full_1024_kib_payload(
     opened: list[Channel],
 ) -> None:
     channel = await connected_channel(
-        unique_channel_reference("cap-plus-one"), opened=opened
+        unique_channel_reference("cap-full"), opened=opened
     )
 
     rejected = await started(
@@ -479,14 +482,14 @@ async def test_refuses_a_payload_one_byte_over_the_1024_kib_plan_cap(
             20,
         )
     )
-    await channel.segment("bulk").publish(bytes(1024 * 1024 + 1))
+    await channel.segment("bulk").publish(bytes(1024 * 1024))
     rejection = await rejected
 
     assert "size limit = 1024 KB" in str(rejection)
     assert channel.state == "connected"
 
 
-# end function test_refuses_a_payload_one_byte_over_the_1024_kib_plan_cap
+# end function test_refuses_a_full_1024_kib_payload
 
 
 async def test_refuses_a_command_over_2_mib_locally_and_stays_connected(
@@ -553,3 +556,55 @@ async def test_delivers_a_paced_burst_of_50_messages_in_publish_order_one_time_e
 
 
 # end function test_delivers_a_paced_burst_of_50_messages_in_publish_order_one_time_each
+
+
+async def test_refuses_over_cap_publishes_in_a_burst_by_message_id(
+    opened: list[Channel],
+) -> None:
+    reference = unique_channel_reference("batch")
+    publisher = await connected_channel(reference, opened=opened)
+    receiver = await connected_channel(reference, opened=opened)
+    refused: list[ServerError] = []
+
+    def record(error: ChannelError) -> None:
+        if isinstance(error, ServerError):
+            refused.append(error)
+
+    # end function record
+
+    publisher.events().on_error(record)
+    received = collect(receiver, "chat")
+    await asyncio.sleep(1.5)
+    bodies = [f"b{index}".encode() for index in range(20)]
+
+    last = await started(
+        next_message(
+            receiver.segment("chat"),
+            lambda message: message.payload == b"b19",
+            "the last message of the burst",
+            30,
+        )
+    )
+
+    # The second over-cap publish waits for buffer room, so the small ones wait
+    # behind it and go out packed (BATCH-01).
+    chat = publisher.segment("chat")
+    over_cap = bytes(1024 * 1024 + 1)
+    await asyncio.gather(
+        chat.publish(over_cap, message_id="too-big-1"),
+        chat.publish(over_cap, message_id="too-big-2"),
+        *(chat.publish(body) for body in bodies),
+    )
+
+    await last
+    await asyncio.sleep(1.5)
+
+    assert [message.payload for message in received] == bodies
+    assert len({message.metadata.message_id for message in received}) == 20
+    assert [(error.type, error.sub_type, error.resource) for error in refused] == [
+        ("MessageSizeLimitError", "PUB", "too-big-1"),
+        ("MessageSizeLimitError", "PUB", "too-big-2"),
+    ]
+
+
+# end function test_refuses_over_cap_publishes_in_a_burst_by_message_id
