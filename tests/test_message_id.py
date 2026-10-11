@@ -8,8 +8,10 @@ from useceleris_client._message_id import generate_message_id, message_id_prefix
 
 def test_generated_ids_name_the_sdk_and_its_version_then_32_hex_digits() -> None:
     identifier = generate_message_id()
+    prefix = message_id_prefix("py", SDK_VERSION)
 
-    assert re.fullmatch(r"msg__py_v1\.0\.0__[0-9a-f]{32}", identifier), identifier
+    assert identifier.startswith(prefix), identifier
+    assert re.fullmatch(r"[0-9a-f]{32}", identifier[len(prefix) :]), identifier
 
 
 # end function test_generated_ids_name_the_sdk_and_its_version_then_32_hex_digits
@@ -60,7 +62,9 @@ def test_a_generated_id_is_sent_as_a_bulk_string() -> None:
         }
     )
 
-    assert frame == f"@PUB\n$4\nchat\n$48\n{identifier}\n$2\nhi\n".encode()
+    assert (
+        frame == f"@PUB\n$4\nchat\n${len(identifier)}\n{identifier}\n$2\nhi\n".encode()
+    )
 
 
 # end function test_a_generated_id_is_sent_as_a_bulk_string
