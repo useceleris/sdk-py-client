@@ -994,9 +994,9 @@ class TestChannelWideDelivery:
 
         sockets[-1].receive(message_frame("chat", "id-1", "hi"))
         sockets[-1].receive(message_frame("default", "id-2", "yo"))
-        sockets[-1].receive(message_frame("joined-by-publish", "id-3", "ok"))
+        sockets[-1].receive(message_frame("no-listener", "id-3", "ok"))
 
-        assert seen == ["chat:hi", "default:yo", "joined-by-publish:ok"]
+        assert seen == ["chat:hi", "default:yo", "no-listener:ok"]
 
     # end method test_receives_every_segments_deliveries_with_or_without_listeners
 

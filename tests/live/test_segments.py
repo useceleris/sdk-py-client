@@ -251,21 +251,67 @@ class TestLeaving:
 # end class TestLeaving
 
 
-# Membership the server grants without a message subscription (SEG-01).
-class TestJoinsTheServerMakes:
-    async def test_delivers_to_a_segment_joined_by_publishing(
+# A publish is not a membership: only a subscription receives (SEG-01).
+class TestAPublishDoesNotJoin:
+    async def test_delivers_nothing_for_a_publish_alone_and_delivers_once_subscribed(
         self, opened: list[Channel]
     ) -> None:
-        publisher, receiver = await pair(opened, "publish-join")
+        publisher, receiver = await pair(opened, "publish-no-join")
         chat = received(receiver, "chat")
-        await receiver.segment("chat").publish(b"joining")
+        publisher.segment("chat").subscribe()
         await asyncio.sleep(1.5)
 
-        await publish_and_await(publisher, receiver, "chat", b"after")
+        # The publish lands, which proves that it ran on the server.
+        await publish_and_await(receiver, publisher, "chat", b"from-receiver")
+        await publisher.segment("chat").publish(b"unheard")
+        await confirm_quiet(publisher, receiver)
+        assert chat == []
 
-        assert chat == [b"after"]
+        receiver.segment("chat").subscribe()
+        await asyncio.sleep(1.5)
+        await publish_and_await(publisher, receiver, "chat", b"heard")
 
-    # end method test_delivers_to_a_segment_joined_by_publishing
+        assert chat == [b"heard"]
+
+    # end method test_delivers_nothing_for_a_publish_alone_and_delivers_once_subscribed
+
+    async def test_gives_no_echo_on_a_named_segment_before_a_subscription(
+        self, opened: list[Channel]
+    ) -> None:
+        reference = unique_channel_reference("publish-no-echo")
+        publisher = await connected_channel(reference)
+        opened.append(publisher)
+        echoing = await connected_channel(reference, allow_echo=True)
+        opened.append(echoing)
+        chat = received(echoing, "chat")
+
+        await echoing.segment("chat").publish(b"unheard")
+        await confirm_quiet(publisher, echoing)
+        assert chat == []
+
+        echoing.segment("chat").subscribe()
+        await asyncio.sleep(1.5)
+        await publish_and_await(echoing, echoing, "chat", b"echoed")
+
+        assert chat == [b"echoed"]
+
+    # end method test_gives_no_echo_on_a_named_segment_before_a_subscription
+
+    async def test_does_not_list_a_connection_that_only_publishes_in_presence(
+        self, opened: list[Channel]
+    ) -> None:
+        publisher, receiver = await pair(opened, "publish-no-presence")
+        publisher.segment("chat").subscribe()
+        await asyncio.sleep(1.5)
+
+        await publish_and_await(receiver, publisher, "chat", b"from-receiver")
+        await asyncio.sleep(3)
+
+        page = await publisher.segment("chat").presence_list(page=1, per_page=25)
+
+        assert len(page.connections) == 1
+
+    # end method test_does_not_list_a_connection_that_only_publishes_in_presence
 
     # Watching presence is not membership: it neither joins nor holds.
     async def test_never_joins_or_holds_a_segment_for_a_presence_subscription(
@@ -292,50 +338,13 @@ class TestJoinsTheServerMakes:
 
     # end method test_never_joins_or_holds_a_segment_for_a_presence_subscription
 
-    async def test_leaves_a_segment_joined_by_publishing_on_the_last_cancel(
-        self, opened: list[Channel]
-    ) -> None:
-        publisher, receiver = await pair(opened, "publish-leave")
-        chat = received(receiver, "chat")
-        await receiver.segment("chat").publish(b"joining")
-        membership = receiver.segment("chat").subscribe()
-        await asyncio.sleep(1.5)
 
-        membership.cancel()
-        await asyncio.sleep(1.5)
-        await publisher.segment("chat").publish(b"late")
-        await confirm_quiet(publisher, receiver)
-
-        assert chat == []
-
-    # end method test_leaves_a_segment_joined_by_publishing_on_the_last_cancel
+# end class TestAPublishDoesNotJoin
 
 
-# end class TestJoinsTheServerMakes
-
-
-# Publishing joins the segment, but read access is checked at the join:
-# only a token that can read and write receives without subscribing.
+# Write access publishes and read access subscribes. The two are separate.
 class TestTokenPermissions:
-    async def test_receives_after_publishing_with_a_read_write_token(
-        self, opened: list[Channel]
-    ) -> None:
-        publisher, receiver = await pair(
-            opened,
-            "publish-read-write",
-            token_permission={"read": True, "write": True},
-        )
-        chat = received(receiver, "chat")
-        await receiver.segment("chat").publish(b"joining")
-        await asyncio.sleep(1.5)
-
-        await publish_and_await(publisher, receiver, "chat", b"after")
-
-        assert chat == [b"after"]
-
-    # end method test_receives_after_publishing_with_a_read_write_token
-
-    async def test_receives_nothing_after_publishing_with_a_write_only_token(
+    async def test_refuses_a_write_only_tokens_subscription_and_delivers_its_publish(
         self, opened: list[Channel]
     ) -> None:
         publisher, receiver = await pair(
@@ -347,14 +356,30 @@ class TestTokenPermissions:
         publisher.segment("chat").subscribe()
         await asyncio.sleep(1.5)
 
-        # The publish lands, which proves the write-only connection is up.
-        await publish_and_await(receiver, publisher, "chat", b"joining")
+        denial = asyncio.ensure_future(
+            next_error(
+                receiver,
+                lambda error: (
+                    isinstance(error, ServerError)
+                    and error.type == "PermissionDeniedError"
+                    and error.sub_type == "SUB"
+                    and error.resource == "chat"
+                ),
+                "the subscription denial",
+            )
+        )
+        await asyncio.sleep(0)
+        receiver.segment("chat").subscribe()
+        await denial
+
+        await publish_and_await(receiver, publisher, "chat", b"written")
         await publisher.segment("chat").publish(b"unheard")
         await asyncio.sleep(2.5)
 
         assert chat == []
+        assert receiver.state == "connected"
 
-    # end method test_receives_nothing_after_publishing_with_a_write_only_token
+    # end method test_refuses_a_write_only_tokens_subscription_and_delivers_its_publish
 
     async def test_refuses_a_read_only_tokens_publish_and_delivers_once_subscribed(
         self, opened: list[Channel]
@@ -474,7 +499,8 @@ class TestChannelWideListener:
         # end function record
 
         receiver.events().on_message(record)
-        await receiver.segment("joined").publish(b"joining")
+        # A subscription with no segment listener, and the default segment.
+        receiver.segment("unlistened").subscribe()
         await asyncio.sleep(1.5)
 
         def register(deliver: Callable[[list[str]], None]) -> Callable[[], None]:
@@ -490,11 +516,11 @@ class TestChannelWideListener:
             )
         )
         await asyncio.sleep(0)
-        await publisher.segment("joined").publish(b"x")
+        await publisher.segment("unlistened").publish(b"x")
         await publisher.default_segment().publish(b"y")
         await both
 
-        assert sorted(seen) == ["default:y", "joined:x"]
+        assert sorted(seen) == ["default:y", "unlistened:x"]
 
     # end method test_catches_deliveries_no_segment_listener_asked_for
 

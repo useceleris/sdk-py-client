@@ -336,36 +336,6 @@ async def test_recovers_every_missed_message_after_a_longer_outage_with_failed_a
 
 
 @pytest.mark.timeout(120)
-async def test_does_not_rejoin_a_segment_that_the_connection_joined_only_by_publishing(
-    proxy: DroppingProxy, opened: list[Channel]
-) -> None:
-    setup = await set_up(proxy, opened, "reconnect-publish-join")
-    receiver, publisher = setup.receiver, setup.publisher
-    team = received(receiver, "team")
-    await receiver.connect()
-    await receiver.segment("team").publish(b"joining")
-    await asyncio.sleep(1.5)
-    before = await arrival(receiver, "team", b"before")
-    await publisher.segment("team").publish(b"before")
-    await before
-
-    await setup.start_outage()
-    await setup.end_outage()
-    await asyncio.sleep(1.5)
-
-    await publisher.segment("team").publish(b"after")
-    control = await arrival(receiver, "default", b"control")
-    await publisher.segment("default").publish(b"control")
-    await control
-    await asyncio.sleep(2.5)
-
-    assert bodies(team) == [b"before"]
-
-
-# end function test_does_not_rejoin_a_segment_that_the_connection_joined_only_by_publishing
-
-
-@pytest.mark.timeout(120)
 async def test_announces_the_new_connection_and_restores_its_presence_subscription(
     proxy: DroppingProxy, opened: list[Channel]
 ) -> None:

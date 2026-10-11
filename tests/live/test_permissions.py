@@ -93,7 +93,7 @@ async def test_lets_a_read_only_segment_receive_and_refuses_its_publish(
 # end function test_lets_a_read_only_segment_receive_and_refuses_its_publish
 
 
-async def test_lets_a_write_only_segment_publish_and_receive_nothing(
+async def test_lets_a_write_only_segment_publish_and_refuses_its_subscription(
     opened: list[Channel],
 ) -> None:
     reference = unique_channel_reference("perm-write")
@@ -101,7 +101,9 @@ async def test_lets_a_write_only_segment_publish_and_receive_nothing(
     limited = await connected_channel(reference, opened=opened, **SEGMENT_PERMISSIONS)
     writeonly = received(limited, "writeonly")
     reader.segment("writeonly").subscribe()
+    refused = await denial(limited, "SUB", "writeonly")
     limited.segment("writeonly").subscribe()
+    await refused
     await asyncio.sleep(1.5)
 
     arrived = await started(
@@ -117,9 +119,38 @@ async def test_lets_a_write_only_segment_publish_and_receive_nothing(
     await asyncio.sleep(2.5)
 
     assert writeonly == []
+    assert limited.state == "connected"
 
 
-# end function test_lets_a_write_only_segment_publish_and_receive_nothing
+# end function test_lets_a_write_only_segment_publish_and_refuses_its_subscription
+
+
+async def test_replays_a_write_only_publish_to_a_later_subscriber(
+    opened: list[Channel],
+) -> None:
+    reference = unique_channel_reference("perm-write-replay")
+    limited = await connected_channel(reference, opened=opened, **SEGMENT_PERMISSIONS)
+    writeonly = received(limited, "writeonly")
+    # No connection is in the segment when the write-only token publishes.
+    await limited.segment("writeonly").publish(b"kept")
+    await asyncio.sleep(1.5)
+
+    reader = await connected_channel(reference, opened=opened, replay=True)
+    replayed = await started(
+        next_message(
+            reader.segment("writeonly"),
+            lambda message: message.payload == b"kept",
+            "the replay of the write-only publish",
+        )
+    )
+    reader.segment("writeonly").subscribe()
+    await replayed
+
+    assert writeonly == []
+    assert limited.state == "connected"
+
+
+# end function test_replays_a_write_only_publish_to_a_later_subscriber
 
 
 async def test_refuses_presence_on_a_segment_without_read_access(

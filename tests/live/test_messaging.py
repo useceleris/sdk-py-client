@@ -219,14 +219,28 @@ async def test_reports_a_read_only_tokens_publish_as_permission_denied() -> None
 # end function test_reports_a_read_only_tokens_publish_as_permission_denied
 
 
-async def test_keeps_a_write_only_token_publishing_while_receiving_nothing() -> None:
+async def test_keeps_a_write_only_token_publishing_after_a_refused_subscription() -> (
+    None
+):
     reference = unique_channel_reference("writeonly")
     write_only = await connected_channel(
         reference, token_permission={"read": False, "write": True}
     )
     reader = await connected_channel(reference)
+    refused = await started(
+        next_error(
+            write_only,
+            lambda error: (
+                isinstance(error, ServerError)
+                and error.type == "PermissionDeniedError"
+                and error.sub_type == "SUB"
+            ),
+            "the subscription denial",
+        )
+    )
     writer_saw = collect(write_only, "chat")
     reader.segment("chat").subscribe()
+    await refused
     await asyncio.sleep(1.5)
 
     await write_only.segment("chat").publish(b"one-way")
@@ -242,7 +256,7 @@ async def test_keeps_a_write_only_token_publishing_while_receiving_nothing() -> 
     await reader.close()
 
 
-# end function test_keeps_a_write_only_token_publishing_while_receiving_nothing
+# end function test_keeps_a_write_only_token_publishing_after_a_refused_subscription
 
 
 @pytest.mark.timeout(240)

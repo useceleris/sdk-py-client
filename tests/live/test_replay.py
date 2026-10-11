@@ -272,25 +272,32 @@ async def test_replays_each_segments_backlog_when_that_segment_is_joined(
 # end function test_replays_each_segments_backlog_when_that_segment_is_joined
 
 
-async def test_replays_to_a_segment_joined_by_publishing(
+async def test_starts_no_replay_with_a_publish_and_replays_on_the_subscription(
     opened: list[Channel],
 ) -> None:
-    reference = unique_channel_reference("replay-publish-join")
+    reference = unique_channel_reference("replay-publish-no-join")
     publisher = await open_channel(opened, reference)
+    # A member keeps the segment, and its backlog, on the server.
+    publisher.segment("history").subscribe()
+    await asyncio.sleep(1.5)
     await publish_all(publisher, "history", [b"h1"])
     await asyncio.sleep(1.5)
 
     receiver = await open_channel(opened, reference, replay=True)
     history = received(receiver, "history")
+    await receiver.segment("history").publish(b"no-join")
+    await asyncio.sleep(2.5)
+    assert bodies(history) == []
+
     replay = await arrival(receiver, "history", b"h1")
-    await receiver.segment("history").publish(b"joining")
+    receiver.segment("history").subscribe()
     await replay
     await asyncio.sleep(1.5)
 
-    assert bodies(history) == [b"h1"]
+    assert b"h1" in bodies(history)
 
 
-# end function test_replays_to_a_segment_joined_by_publishing
+# end function test_starts_no_replay_with_a_publish_and_replays_on_the_subscription
 
 
 async def test_recovers_what_a_rejoin_missed_and_drops_what_it_already_delivered(
