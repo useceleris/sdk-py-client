@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A PyPI version is immutable. Do not cancel an approved upload because a
+# maintainer starts another release run.
+concurrency:
+  group: python-client-release
+  cancel-in-progress: false
+
+jobs:
+  release-version:
+    # The workflow file lives on main so GitHub can dispatch it. A production
+    # release itself may run only from the reviewed release branch.
+    if: github.ref == 'refs/heads/release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Verify the final release version
+        shell: bash
+        run: |
+          python - <<'PY'
+          import re
+          import tomllib
+          from pathlib import Path
+
+          project = tomllib.loads(Path("pyproject.toml").read_text())
+          project_version = project["project"]["version"]
+          constants = Path("src/useceleris_client/_constants.py").read_text()
+          match = re.search(r'^SDK_VERSION = "([^"]+)"$', constants, re.MULTILINE)
+          if match is None:
+              raise SystemExit("SDK_VERSION is missing from _constants.py")
+
+          sdk_version = match.group(1)
+          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", project_version):
+              raise SystemExit(
+                  f"Release versions must be final semantic versions: {project_version}"
+              )
+          if sdk_version != project_version:
+              raise SystemExit(
+                  f"SDK_VERSION {sdk_version} does not match project version {project_version}"
+              )
+          PY
+
+  # Keep the release protected by every ordinary CI gate.
+  check:
+    if: github.ref == 'refs/heads/release'
+    needs: release-version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+      - uses: astral-sh/setup-uv@v10.2.0
+      - run: uv run --locked nox
+
+  build:
+    if: github.ref == 'refs/heads/release'
+    needs: [release-version, check]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v10.2.0
+      - run: uv build --out-dir dist
+     
+      - name: Smoke-test the staged wheel
+        shell: bash
+        run: uv run --isolated --no-project --with dist/*.whl python -c "import useceleris_client"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    if: github.ref == 'refs/heads/release'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The configured required reviewer pauses this job before it receives the
+    # PyPI OIDC credential. It must match the environment on PyPI's trusted
+    # publisher configuration.
+    environment:
+      name: any
+      url: https://pypi.org/p/useceleris-client/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist/
+      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Publish the approved distribution
+        run: uv publish dist/*
